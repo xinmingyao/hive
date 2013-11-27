@@ -788,36 +788,6 @@ void mp_decode_to_lua_type(lua_State *L, mp_cur *c) {
     }
 }
 
-static int mp_unpack_raw(lua_State *L) {
-    int len;
-    const unsigned char *s;
-    mp_cur *c;
-    struct msg_ud * ud  = (struct msg_ud *) lua_touserdata(L,2);
-    if(ud == NULL) {
-        lua_pushstring(L,"not msg_ud in input.");
-        lua_error(L);
-    }
-    s=ud->data;
-    len = lua_tointeger(L,3);
-    c = mp_cur_new(s,len);
-    mp_decode_to_lua_type(L,c);
-
-    if (c->err == MP_CUR_ERROR_EOF) {
-        mp_cur_free(c);
-        lua_pushstring(L,"Missing bytes in input.");
-        lua_error(L);
-    } else if (c->err == MP_CUR_ERROR_BADFMT) {
-        mp_cur_free(c);
-        lua_pushstring(L,"Bad data format in input.");
-        lua_error(L);
-    } else if (c->left != 0) {
-        mp_cur_free(c);
-        lua_pushstring(L,"Extra bytes in input.");
-        lua_error(L);
-    }
-    mp_cur_free(c);
-    return 1;
-}
 static int mp_unpack(lua_State *L) {
     size_t len;
     const unsigned char *s;
@@ -854,7 +824,6 @@ static int mp_unpack(lua_State *L) {
 static const struct luaL_Reg thislib[] = {
     {"pack", mp_pack},
     {"unpack", mp_unpack},
-    {"unpack_raw", mp_unpack_raw},
     {NULL, NULL}
 };
 

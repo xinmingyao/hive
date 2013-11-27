@@ -3,5 +3,4 @@
 
 int data_pack(lua_State *L);
 int data_unpack(lua_State *L);
-
 #endif

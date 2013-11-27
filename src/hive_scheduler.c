@@ -6,8 +6,9 @@
 #include "hive_log.h"
 #include "hive_scheduler.h"
 #include "hive_system_lib.h"
+#include "hive_cell_lib.h"
 #include "stable.h"
-
+#include "hive.h"
 #include <stdint.h>
 #include <stdio.h>
 #ifdef _WIN32
@@ -186,7 +187,7 @@ _start(struct global_queue *gmq, struct timer *t) {
 	}
 	
 	for (i=0;i<thread;i++) {
-		 WaitForSingleObject(pid[i], INFINITE);
+		 //WaitForSingleObject(pid[i], INFINITE);
 	}
 #else
 	pthread_t pid[thread+1];
@@ -204,74 +205,87 @@ _start(struct global_queue *gmq, struct timer *t) {
 #endif
 }
 
-#if defined(_GUI) //for gui app,print to file
-static void
-luaV_addlstring(luaL_Buffer *b, const char *s, size_t l, int toline)
+static
+char* IupStrFileGetPath(const char *file_name)
 {
-    while (l--)
+  /* Starts at the last character */
+  int len = strlen(file_name) - 1;
+  while (len != 0)
+  {
+    if (file_name[len] == '\\' || file_name[len] == '/')
     {
-	luaL_addchar(b, *s);
-	s++;
+      len++;
+      break;
     }
+
+    len--;
+  }
+
+  if (len == 0)
+    return NULL;
+
+  {
+    char* path = malloc(len+1);
+    memcpy(path, file_name, len);
+    path[len] = 0;
+
+    return path;
+  }
 }
 
-static int
-hive_print(lua_State *L)
-{
-    int i, n = lua_gettop(L); /* nargs */
-    const char *s;
-    size_t l;
-    luaL_Buffer b;
-    luaL_buffinit(L, &b);
-    lua_getglobal(L, "tostring");
-    for (i = 1; i <= n; i++)
-    {
-	lua_pushvalue(L, -1); /* tostring */
-	lua_pushvalue(L, i); /* arg */
-	lua_call(L, 1, 1);
-	s = lua_tolstring(L, -1, &l);
-	if (s == NULL)
-	    return luaL_error(L, "cannot convert to string");
-	if (i > 1) luaL_addchar(&b, ' '); /* use space instead of tab */
-	luaV_addlstring(&b, s, l, 0);
+static void *
+_gui(void *p) {
+	lua_State *L = p;
+	const char * mainfile = luaL_checkstring(L,-1);
 	lua_pop(L, 1);
-    }
-    luaL_pushresult(&b);
-    const char *p, *s2 = lua_tolstring(L, -1, &l);
-    lua_pop(L,1);
-    hive_getenv(L,"print_log");
-    FILE * fp = lua_touserdata(L,-1);
-    fwrite(s2,sizeof(char),l,fp);
-    char line[2] = "\n";
-    fwrite(line,sizeof(char),2,fp);
-    fflush(fp);    
-    lua_pop(L,1);
-    return 0;
+	luaL_requiref(L, "cell.c", cell_lib, 0);
+	lua_pop(L,1);
+	lua_newtable(L);
+	lua_newtable(L);
+	lua_pushliteral(L, "v");
+	lua_setfield(L, -2, "__mode");
+	lua_setmetatable(L,-2);
+	hive_setenv(L, "cell_map");
+	
+	char iup[256];
+	char * path = IupStrFileGetPath(mainfile); 
+	sprintf(iup,("IUPLUA_DIR=%s\\iup\\"),path);
+	_putenv(iup);
+	int err = luaL_loadfile(L, mainfile);
+	if (err) {
+		printf("%d : %s\n", err, lua_tostring(L,-1));	
+		goto _error;
+	}
+	err = lua_pcall(L, 0, 0, 0);
+	if (err) {
+		printf("start gui (%s) error %d : %s\n", mainfile, err, lua_tostring(L,-1));
+		goto _error;
+	}
+	return NULL;
+_error:
+	return NULL;
 }
-#endif 
+static void
+_start_gui(lua_State *L, const char *gui) {
+	lua_pushstring(L,gui);
+#if defined(_WIN32)
+	HANDLE pid;
+	pid=CreateThread(NULL, 0, _gui, L, 0, NULL);
+	WaitForSingleObject(pid, INFINITE);
+#else
+	pthread_t pid;
+	pthread_create(&pid, NULL, _gui, L);
+	pthread_join(pid, NULL); 
+
+#endif
+}
+
 
 lua_State *
 scheduler_newtask(lua_State *pL) {
 	lua_State *L = luaL_newstate();
 	luaL_openlibs(L);
 	hive_createenv(L);
-#if defined(_GUI) //for gui app,print to file
-	hive_copyenv(L, pL, "print_log");
-	//hive_copyenv(L, pL, "hive_gui_lib");
-	/* print */
-    lua_pushcfunction(L, hive_print);
-    lua_setglobal(L, "print");
-	lua_pushstring(pL,"hive_gui_lib");
-	lua_gettable(pL, LUA_REGISTRYINDEX);		
-	if (lua_type(pL,-1)==LUA_TFUNCTION) {
-		lua_CFunction hive_gui_lib = lua_tocfunction(pL, -1);
-		lua_pop(pL,1);
-		luaL_requiref(L, "hive.gui", hive_gui_lib, 0);
-		lua_pop(L,1);
-	} else {
-		lua_pop(pL,1);
-	}
-#endif
 	struct global_queue * mq = hive_copyenv(L, pL, "message_queue");
 	globalmq_inc(mq);
 	hive_copyenv(L, pL, "system_pointer");
@@ -313,47 +327,26 @@ scheduler_start(lua_State *L) {
 	lua_getfield(L,1, "thread");
 	int thread = luaL_optinteger(L, -1, DEFAULT_THREAD);
 	lua_pop(L,1);
-
 	hive_createenv(L);
 	struct global_queue * gmq = lua_newuserdata(L, sizeof(*gmq));
 	globalmq_init(gmq, thread);
-
 	lua_pushvalue(L,-1);
 	hive_setenv(L, "message_queue");
+	if(lua_type(L,4) == LUA_TSTRING){ //strat gui
+		struct table * cell_registar = stable_create();
+		lua_pushlightuserdata(L,cell_registar);
+		hive_setenv(L,"cell_registar");
 	
-	#if defined(_GUI) //for gui app,log to file
-	FILE * fp;
-	fp=fopen("hive_gui.log","a+");
-	lua_pushlightuserdata(L,fp);
-	hive_setenv(L,"print_log");
-	#endif
+		struct table * handle_registar = stable_create();
+		lua_pushlightuserdata(L,handle_registar);
+		hive_setenv(L,"win_handle_registar");
+	}
 	
-	//  cell registar ,win handle registar
-	//struct table * cell_registar = lua_newuserdata(L,sizeof(struct table));
-	struct table * cell_registar = stable_create();
-	lua_pushlightuserdata(L,cell_registar);
-	hive_setenv(L,"cell_registar");
-	
-	struct table * handle_registar = stable_create();
-	lua_pushlightuserdata(L,handle_registar);
-	hive_setenv(L,"win_handle_registar");
 	// end
 	lua_State *sL;
-
-	
-	
 	sL = scheduler_newtask(L);
 	luaL_requiref(sL, "cell.system", cell_system_lib, 0);
 	lua_pop(sL,1);
-	#if defined(_GUI) //copy hive_gui to system cell
-	lua_pushstring(L,"hive_gui_lib");
-	lua_gettable(L, LUA_REGISTRYINDEX);
-	lua_CFunction hive_gui_lib = lua_tocfunction(L, -1);
-	lua_pop(L,1);
-	lua_pushstring(sL,"hive_gui_lib");
-	lua_pushcfunction(sL, hive_gui_lib);
-	lua_settable(sL, LUA_REGISTRYINDEX);
-	#endif
 	lua_pushstring(sL, main_lua);
 	lua_setglobal(sL, "maincell");
 
@@ -367,8 +360,68 @@ scheduler_start(lua_State *L) {
 	timer_init(t,sys,gmq);
 
 	_start(gmq,t);
+		
+	if(lua_type(L,4) == LUA_TSTRING){ //strat gui
+		const char * gui_lua = luaL_checkstring(L,4);
+		lua_State * gui_l = gui_new(L);
+		_start_gui(L,gui_lua);
+	}
 	cell_close(sys);
 
 	return 0;
 }
+
+static int
+lsend_to_cell(lua_State *L) {
+	int len;
+	char * msg;
+	const char * name;
+	int status = 0 ;
+	name  = luaL_checkstring(L,1);
+	if(lua_type(L,-1) == LUA_TTABLE) {
+		mp_pack_raw(L);
+		len = luaL_checkinteger(L,-2);
+		msg = lua_touserdata(L,-1);
+		hive_getenv(L,"cell_registar");
+		struct table * registar = lua_touserdata(L,-1);
+		lua_pop(L,1);
+		struct cell * c =(struct cell *)stable_id(registar,name,strlen(name));
+		if(c == NULL){
+			status = 2;
+		}
+		if(cell_send(c,GUI_PORT,msg,len)) {
+			status = 3; //cell closed
+		}
+	}else{
+		status = 1 ;
+	}
+	lua_pushinteger(L,status);
+	return 1;
+}
+
+int
+iup_hive_lib(lua_State *L) {
+	luaL_checkversion(L);
+	luaL_Reg l[] = {
+		{"send_to_cell", lsend_to_cell},
+		{NULL, NULL },
+	};
+	luaL_newlib(L,l);
+	return 1;
+}
+
+lua_State * gui_new(pL){
+	lua_State *L = luaL_newstate();
+	luaL_openlibs(L);
+	hive_createenv(L);	
+
+	hive_copyenv(L, pL, "cell_registar");
+	hive_copyenv(L, pL, "win_handle_registar");
+	
+	
+
+	return L;
+}
+
+
 

@@ -30,7 +30,8 @@ hive_copyenv(lua_State *L, lua_State *fromL, const char *key) {
 	hive_getenv(fromL, key);
 	void *p = lua_touserdata(fromL, -1);
 	lua_pop(fromL, 1);
-
+	if(p == NULL)
+		return p;
 	lua_pushlightuserdata(L, p);
 	hive_setenv(L, key);
 

@@ -92,11 +92,7 @@ lrelease(lua_State *L) {
 	return 0;
 }
 
-static int release_msgud(lua_State *L) {
-	struct msg_ud * ud = (struct msg_ud *)lua_touserdata(L,1);
-	free(ud->data);
-	return 0;
-}
+
 void 
 cell_touserdata(lua_State *L, int index, struct cell *c) {
 	lua_rawgetp(L, index, c);
@@ -225,16 +221,7 @@ lcallback(lua_State *L) {
 	}else if(port == GUI_PORT) { //msg from win32 gui
 		lua_pushvalue(L, lua_upvalueindex(3));	// dispatcher 3
 		lua_pushinteger(L, port);
-		struct msg_ud * ud = (struct msg_ud *)lua_newuserdata(L,sizeof(*ud));// dispatcher port  msg 
-		ud->data =  msg;
-		if (luaL_newmetatable(L, "gui_msg")) { //metatable
-			//lua_pushcfunction(L, ltostring);
-			//lua_setfield(L, -2, "__tostring");
-			lua_pushcfunction(L, release_msgud);
-			lua_setfield(L, -2, "__gc");
-		}
-		lua_setmetatable(L, -2);
-		//lua_pushlightuserdata(L, msg);	
+		lua_pushlightuserdata(L, msg);	
 		lua_pushinteger(L, size);
 		err = lua_pcall(L,3, 0, 1);
 	}
@@ -299,10 +286,6 @@ cell_new(lua_State *L, const char * mainfile) {
 	int err = luaL_loadfile(L, mainfile);
 	if (err) {
 		printf("%d : %s\n", err, lua_tostring(L,-1));	
-		char str[1024];
-		sprintf(str,"%d : %s\n", err, lua_tostring(L,-1));
-		hive_log(L,1,str);
-		
 		lua_pop(L,1);
 		goto _error;
 	}
@@ -310,10 +293,6 @@ cell_new(lua_State *L, const char * mainfile) {
 	err = lua_pcall(L, 0, 0, 0);
 	if (err) {
 		printf("new cell (%s) error %d : %s\n", mainfile, err, lua_tostring(L,-1));
-		char str[1024];
-		sprintf(str,"new cell (%s) error %d : %s\n", mainfile, err, lua_tostring(L,-1));
-		hive_log(L,1,str);
-		lua_pop(L,1);
 		goto _error;
 	}
 	lua_pushcfunction(L, traceback);	// upvalue 1

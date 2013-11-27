@@ -6,7 +6,13 @@ local hive = {}
 
 function hive.start(t)
 	local main = assert(package.searchpath(t.main, package.path), "main cell was not found")
-	return c.start(t, system_cell, main)
+	local gui = package.searchpath(t.gui, package.path)
+	print(c,main,gui)
+	if gui then
+		return c.start(t, system_cell, main,gui)
+	else
+		return c.start(t, system_cell, main)
+	end
 end
 
 return hive

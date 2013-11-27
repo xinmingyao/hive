@@ -1,7 +1,9 @@
 local c = require "cell.c"
 local csocket = require "cell.c.socket"
-local binlib =  require "cell.binlib"
+
 local msgpack = require "cell.msgpack"
+
+
 local coroutine = coroutine
 local assert = assert
 local select = select
@@ -309,10 +311,11 @@ end
 cell.dispatch {
 	id = 7,	-- gui
 	dispatch = function(msg,len)
-        local info = msgpack:unpack_raw(msg,len)
+		local pos,rep = binlib.unpack("A"..len,msg,len)
+        local info = msgpack:unpack(rep)
         local f = gui[info[2]]
 		if f == nil then
-			c.post_message(tonumber(info[1]),"error",{-1,"Unknown gui command " ..  info[2]})
+			c.post_message(tonumber(info[1]),info[2],{-1,"Unknown gui command " ..  info[2]})
 		else
 			local co = coroutine.create(function()
                         local t = f(info)
@@ -392,9 +395,10 @@ cell.dispatch {
 					if data then
 						rpc_head[fd]  = nil
 						local pos,rep = binlib.unpack("A"..rpc_head[fd],data)
-						local info = msgpack:unpack(rep,rpc_head[fd])
+						local info = msgpack:unpack(rep)
 						local fs = rpc[fd]
 						local f = fs[info[1]]
+						print(f)
 						if f then
 							f(fd,info)
 						else

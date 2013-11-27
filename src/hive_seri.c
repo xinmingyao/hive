@@ -551,6 +551,8 @@ _unpack_one(lua_State *L, struct read_block *rb, int table_index) {
 	_push_value(L, rb, *t & 0x7, *t>>3, table_index);
 }
 
+
+
 int
 data_unpack(lua_State *L) {
 	struct block * blk = lua_touserdata(L,1);
@@ -561,7 +563,6 @@ data_unpack(lua_State *L) {
 	lua_settop(L,2);
 	struct read_block rb;
 	rb_init(&rb, blk);
-
 	int i;
 	for (i=0;;i++) {
 		if (i%16==15) {
