@@ -1,6 +1,9 @@
+
+package.path = package.path .. ";./hive/?.lua"
 local cell = require "cell"
 local msgpack = require "cell.msgpack"
 local binlib =  require "cell.binlib"
+local http = require "http"
 local function accepter(fd, addr, listen_fd)
 	print("Accept from ", listen_fd)
 	-- can't read fd in this function, because socket.cell haven't forward data from fd
@@ -17,8 +20,8 @@ print(333333333)
 print(up)
 print(up[1])
 
-print("--------",win_handle)
-win_handle["test"] = "win_handle hello world"
+--print("--------",win_handle)
+--win_handle["test"] = "win_handle hello world"
 local function udp(fd,len,msg,peer_ip,peer_port)
       local obj=cell.bind(fd)
       obj:write(p,peer_ip,peer_port)
@@ -27,10 +30,19 @@ local function udp(fd,len,msg,peer_ip,peer_port)
 end
 
 function cell.main()
+	local monitor = cell.cmd("launch","hive.simplemonitor")
 	print("[cell main]",cell.self)
+	
+	local rep = http.get_url("http://192.168.203.157/",{})
+	print("#######",rep.status,rep.body)
 	-- save listen_fd for prevent gc.
-	cell.listen("127.0.0.1:8888",accepter)
-	cell.open(9998,udp)
+	--cell.listen("127.0.0.1:8888",accepter)
+	--cell.open(9998,udp)
+    local u =msgpack.pack({channel_id,"join_share",123,"tmp"})
+    local len = string.len(u)
+    local u1 = binlib.pack("A",u)
+    local l = msgpack.unpack(u)
+    print("*******",l[2])
 --[[
 	local sock = cell.connect("localhost", 8088)	
 	local u =msgpack.pack({"test","pwd"})
@@ -50,19 +62,24 @@ function cell.main()
 	local rep = msgpack.unpack(rep)
 	print(rep[1],rep[2])
 ]]
+
+	print("monitor:",monitor)
 	print(cell.cmd("echo","Hello world"))
 	local ping, pong = cell.cmd("launch", "test.pingpong","pong",gui)
-	print(ping,pong)
+	print("----",ping,pong)
+	cell.monitor(ping)
 	print(cell.call(ping, "ping"))
 	cell.fork(function()
 		-- kill ping after 9 second
-		cell.sleep(900)
+		cell.sleep(200)
 		cell.cmd("kill",ping) end
 	)
 	for i=1,1 do
 		print(pcall(cell.call,ping, "ping"))
 		cell.sleep(100)
-		print(i)
+		print("loop:",i)
 	end
+	print(cell.call(ping,"sleep",300))
+	print("self:",cell.self)
 --	cell.exit()
 end

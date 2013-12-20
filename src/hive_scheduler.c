@@ -3,7 +3,6 @@
 #include "lualib.h"
 #include "hive_cell.h"
 #include "hive_env.h"
-#include "hive_log.h"
 #include "hive_scheduler.h"
 #include "hive_system_lib.h"
 #include "hive_cell_lib.h"
@@ -24,7 +23,7 @@
 #define DEFAULT_THREAD 4
 #define MAX_GLOBAL_MQ 0x10000
 #define GP(p) ((p) % MAX_GLOBAL_MQ)
-
+static lua_State * gui_new(lua_State *pL);
 struct global_queue {
 	uint32_t head;
 	uint32_t tail;
@@ -232,7 +231,7 @@ char* IupStrFileGetPath(const char *file_name)
     return path;
   }
 }
-
+#if defined(_WIN32)
 static void *
 _gui(void *p) {
 	lua_State *L = p;
@@ -265,6 +264,8 @@ _gui(void *p) {
 _error:
 	return NULL;
 }
+#endif 
+
 static void
 _start_gui(lua_State *L, const char *gui) {
 	lua_pushstring(L,gui);
@@ -273,9 +274,9 @@ _start_gui(lua_State *L, const char *gui) {
 	pid=CreateThread(NULL, 0, _gui, L, 0, NULL);
 	WaitForSingleObject(pid, INFINITE);
 #else
-	pthread_t pid;
-	pthread_create(&pid, NULL, _gui, L);
-	pthread_join(pid, NULL); 
+	//pthread_t pid;
+	//pthread_create(&pid, NULL, _gui, L);
+	//pthread_join(pid, NULL); 
 
 #endif
 }
@@ -332,6 +333,7 @@ scheduler_start(lua_State *L) {
 	globalmq_init(gmq, thread);
 	lua_pushvalue(L,-1);
 	hive_setenv(L, "message_queue");
+#if defined(_WIN32)
 	if(lua_type(L,4) == LUA_TSTRING){ //strat gui
 		struct table * cell_registar = stable_create();
 		lua_pushlightuserdata(L,cell_registar);
@@ -341,7 +343,7 @@ scheduler_start(lua_State *L) {
 		lua_pushlightuserdata(L,handle_registar);
 		hive_setenv(L,"win_handle_registar");
 	}
-	
+#endif
 	// end
 	lua_State *sL;
 	sL = scheduler_newtask(L);
@@ -360,12 +362,13 @@ scheduler_start(lua_State *L) {
 	timer_init(t,sys,gmq);
 
 	_start(gmq,t);
-		
+#if defined(_WIN32)		
 	if(lua_type(L,4) == LUA_TSTRING){ //strat gui
 		const char * gui_lua = luaL_checkstring(L,4);
 		lua_State * gui_l = gui_new(L);
 		_start_gui(L,gui_lua);
 	}
+#endif
 	cell_close(sys);
 
 	return 0;
@@ -410,16 +413,14 @@ iup_hive_lib(lua_State *L) {
 	return 1;
 }
 
-lua_State * gui_new(pL){
+static lua_State * gui_new(lua_State *pL){
 	lua_State *L = luaL_newstate();
 	luaL_openlibs(L);
 	hive_createenv(L);	
 
 	hive_copyenv(L, pL, "cell_registar");
 	hive_copyenv(L, pL, "win_handle_registar");
-	
-	
-
+      
 	return L;
 }
 

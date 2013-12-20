@@ -45,6 +45,34 @@ struct cell_ud {
 
 static int __cell =0;
 #define CELL_TAG (&__cell)
+#define HIVE_EXIT 8
+
+static struct cell * monitor_exit = NULL;
+
+int register_monitor(struct cell *c){
+  if(monitor_exit)
+    return -1;
+  monitor_exit =  c;
+  return 0;
+}
+struct cell * monitor_cell(){
+  return monitor_exit;
+}
+static void
+send_to_monitor(struct cell *exit){
+  lua_State * L = exit->L;
+  hive_getenv(L,"cell_map");
+  int cell_map = lua_absindex(L,-1);
+  cell_touserdata(L,cell_map,exit);//cell_map,cell
+  lua_pushcfunction(L,data_pack);//cell_map,cell,data_pack
+  lua_pushvalue(L,-2);
+  lua_call(L,1,1);
+  void * msg = lua_touserdata(L,-1);
+  lua_pop(L,3);
+  if (monitor_exit){
+    cell_send(monitor_exit,HIVE_EXIT,msg,0);
+  }
+}
 
 void
 cell_grab(struct cell *c) {
@@ -68,6 +96,13 @@ cell_unlock(struct cell *c) {
 	__sync_lock_release(&c->lock);
 }
 
+static int
+leq(lua_State *L) {
+  struct cell_ud * c1 = lua_touserdata(L,1);
+  struct cell_ud * c2 = lua_touserdata(L,2);
+  lua_pushboolean(L,c1->c == c2->c);
+  return 1; 
+}
 static int
 ltostring(lua_State *L) {
 	char tmp[32];
@@ -110,6 +145,8 @@ cell_touserdata(lua_State *L, int index, struct cell *c) {
 		lua_setfield(L, -2, "__tostring");
 		lua_pushcfunction(L, lrelease);
 		lua_setfield(L, -2, "__gc");
+		lua_pushcfunction(L, leq);
+		lua_setfield(L, -2, "__eq");
 	}
 	lua_setmetatable(L, -2);
 	lua_pushvalue(L, -1);
@@ -319,6 +356,7 @@ cell_close(struct cell *c) {
 	cell_lock(c);
 	c->close = true;
 	cell_unlock(c);
+	send_to_monitor(c);//send exit cell to monitor cell 
 }
 
 static void

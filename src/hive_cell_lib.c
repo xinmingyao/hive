@@ -143,14 +143,16 @@ lpost_message(lua_State *L) {
   return 0;
 }
 
-static int
-send_dispatch(lua_State *L) {
-	if(lua_type(L,1) == LUA_TSTRING||lua_type(L,1) == LUA_TNUMBER){//to gui winhandle
-		return lpost_message(L);
-	}else{
-		return lsend(L); //to cell
-	}
+HIVE_API
+int
+regist_handle(lua_State *L,char * name,int size,HWND handle) {
+  hive_getenv(L,"win_handle_registar");
+  struct table * registar = lua_touserdata(L,-1);
+  lua_pop(L,1);
+  stable_setid(registar,name,size,(uint64_t)handle);
+  return 0;
 }
+
 
 HIVE_API
 int
@@ -167,17 +169,30 @@ send_to_cell(lua_State *L,char * name,char * msg,int size){
   }
   return 0;
 }
-HIVE_API
-int
-regist_handle(lua_State *L,char * name,int size,HWND handle) {
-  hive_getenv(L,"win_handle_registar");
-  struct table * registar = lua_touserdata(L,-1);
-  lua_pop(L,1);
-  stable_setid(registar,name,size,(uint64_t)handle);
-  return 0;
+
+
+
+static int
+send_dispatch(lua_State *L) {
+	if(lua_type(L,1) == LUA_TSTRING||lua_type(L,1) == LUA_TNUMBER){//to gui winhandle
+		return lpost_message(L);
+	}else{
+		return lsend(L); //to cell
+	}
 }
 
+
 #endif
+
+static int
+lregister_monitor(lua_State *L) {
+  struct cell * c = cell_fromuserdata(L,1);
+  int r = register_monitor(c);
+  lua_pushboolean(L,r);
+  return 1;
+
+}
+
 
 static int
 ldata_unpack(lua_State *L) {
@@ -186,17 +201,33 @@ ldata_unpack(lua_State *L) {
 	return data_unpack(L);
 }
 
+static int
+lmonitor_cell(lua_State *L) {
+  struct cell * c = monitor_cell();
+  if (c) {
+    hive_getenv(L,"cell_map");
+    int cell_map = lua_absindex(L,-1);
+    cell_touserdata(L,cell_map,c);
+    return 1;
+  }else{
+    return 0;
+  }
+}
 int
 cell_lib(lua_State *L) {
 	luaL_checkversion(L);
 	luaL_Reg l[] = {
 		{ "dispatch", ldispatch },
-		{ "send", send_dispatch },
 		{ "iup_send", iup_send },
 		{ "register", lregister },
-		{ "data_unpack", ldata_unpack},	
+		{ "data_unpack", ldata_unpack},
+		{ "register_monitor", lregister_monitor},
+		{ "monitor_cell",lmonitor_cell},
 #if defined(_WIN32)
 		{"post_message",lpost_message},
+		{ "send", send_dispatch },
+#else
+		{ "send", lsend },
 #endif
 		{ NULL, NULL },
 	};

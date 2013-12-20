@@ -31,6 +31,9 @@ sraw.init()  -- init lightuserdata metatable
 local event_q1 = {}
 local event_q2 = {}
 
+local watching_service = {}
+local watching_session = {}
+
 local function new_task(source, session, co, event)
 	task_coroutine[event] = co
 	task_session[event] = session
@@ -73,13 +76,33 @@ end
 function cell.call(addr, ...)
 	-- command
 	session = session + 1
-	c.send(addr, 2, cell.self, session, ...)
-	return select(2,assert(coroutine.yield("WAIT", session)))
+	local s = session
+	if watching_service[addr] then
+	   watching_session[s] = addr
+	end
+	if watching_service[addr]==false then
+	   return false,"cell_exit"
+	end
+	local ok,err = pcall(c.send,addr, 2, cell.self, s,...)
+	if not ok then
+	   return false,err
+	end
+	return select(2,coroutine.yield("WAIT", s))
 end
 
 function cell.rawcall(addr, session, ...)
-	c.send(addr, ...)
-	return select(2,assert(coroutine.yield("WAIT", session)))
+	local s = session
+	if watching_service[addr] then
+	   watching_session[s] = addr
+	end
+	if watching_service[addr]==false then
+	   return false,"cell_exit"
+	end
+	local ok,err = pcall(c.send,addr,...)
+	if not ok then
+	   return false,err
+	end
+	return select(2,coroutine.yield("WAIT", s))
 end
 
 function cell.send(addr, ...)
@@ -123,7 +146,10 @@ end
 local function suspend(source, session, co, ok, op, ...)
 	if ok then
 		if op == "RETURN" then
-			c.send(source, 1, session, true, ...)
+		      	local ok,err = pcall(c.send,source, 1, session, true,...)
+			if not ok then
+			   print("cell:",cell.self," " ,err)
+			end
 		elseif op == "EXIT" then
 			-- do nothing
 		elseif op == "WAIT" then
@@ -142,7 +168,8 @@ end
 local function resume_co(session, ...)
 	local co = task_coroutine[session]
 	if co == nil then
-		error ("Unknown response : " .. tostring(session))
+	      	 return --flush
+		--error ("Unknown response : " .. tostring(session))
 	end
 	local reply_session = task_session[session]
 	local reply_addr = task_source[session]
@@ -416,13 +443,6 @@ cell.dispatch {
 cell.dispatch {
 	id = 5, -- exit
 	dispatch = function()
-		local err = tostring(self) .. " is dead"
-		for event,session in pairs(task_session) do
-			local source = task_source[event]
-			if source ~= self then
-				c.send(source, 1, session, false, err)
-			end
-		end
 	end
 }
 
@@ -468,6 +488,22 @@ cell.dispatch {
 	end,
 }
 
+cell.dispatch {
+	id = 8,	-- monitor
+	dispatch = function (service)
+	watching_service[service] = false
+	for session, srv in pairs(watching_session) do
+	    if srv == service then
+	        local co = task_coroutine[session]
+		if co then
+		   coroutine.resume(co,false,false,"cell_exit")
+		   watching_session[session] = nil
+		end
+	    end
+	end		
+	end,
+}
+
 c.dispatch(function(p,...)
 	local pp = port[p]
 	if pp == nil then
@@ -478,4 +514,19 @@ c.dispatch(function(p,...)
 	deliver_event()
 end)
 
+function cell.register_monitor()
+      c.register_monitor(self)
+end
+
+function cell.monitor(service)
+      if not watching_service[service] then
+      	 watching_service[service] = true
+	 local mon = c.monitor_cell()
+	 if mon then
+      	    cell.call(mon,"monitor",self,service)
+	 else
+	    print("no monitor serivce!")
+	 end
+      end
+end
 return cell

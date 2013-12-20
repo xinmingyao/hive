@@ -17,6 +17,8 @@ LUALIB_API int luaopen_binlib_c (lua_State *L);
 HIVE_API
 lua_State * gui_new();
 
+#else
+#define HIVE_API 
 #endif
 
 #endif

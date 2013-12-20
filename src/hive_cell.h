@@ -18,4 +18,6 @@ void cell_grab(struct cell *c);
 void cell_release(struct cell *c);
 void cell_close(struct cell *c);
 void cell_setname(struct cell *c,const char * name);
+int register_monitor(struct cell *c);
+struct cell *  monitor_cell();
 #endif
