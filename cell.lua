@@ -1,3 +1,24 @@
+--package.path = package.path .. ";./hive/?.lua;./?.lua"
+--forbid global varible
+----[[
+mt={} 
+mt.__index=function(t,k) 
+   if not(mt[k]) then 
+      error("attempt to read undeclared variable "..k,2) 
+      return nil 
+   end 
+end 
+mt.__newindex=function(t,k,v) 
+   if not(mt[k]) then 
+      error("attempt to write undeclared variable "..k,2) 
+   else 
+      rawset(t,k,v) 
+      mt[k]=true 
+   end 
+end 
+setmetatable(_G,mt) 
+--]]
+
 local c = require "cell.c"
 local csocket = require "cell.c.socket"
 
@@ -24,9 +45,9 @@ local cell = {}
 
 local self = c.self
 local system = c.system
-win_handle =  c.win_handle
+local win_handle =  c.win_handle
 cell.self = self
-sraw = require "cell.stable"
+local sraw = require "cell.stable"
 sraw.init()  -- init lightuserdata metatable
 local event_q1 = {}
 local event_q2 = {}
@@ -70,7 +91,7 @@ function cell.event()
 end
 
 function cell.wait(event)
-	coroutine.yield("WAIT", event)
+	return coroutine.yield("WAIT", event)
 end
 
 function cell.call(addr, ...)
@@ -178,7 +199,7 @@ local function resume_co(session, ...)
 	task_source[session] = nil
 	suspend(reply_addr, reply_session, co, coroutine.resume(co, ...))
 end
-
+cell.resume_co = resume_co
 local function deliver_event()
 	while next(event_q1) do
 		event_q1, event_q2 = event_q2, event_q1
@@ -204,7 +225,7 @@ local sockets_accept = {}
 local sockets_udp = {}
 local socket = {}
 local listen_socket = {}
-
+local socket_opts = {}
 local rpc = {}
 local rpc_head = {}
 local function close_msg(self)
@@ -234,25 +255,26 @@ function listen_socket:disconnect()
 	socket.disconnect(self)
 end
 
-function cell.connect(addr, port)
+function cell.connect(addr, port,opts)
 	sockets_fd = sockets_fd or cell.cmd("socket")
-	local obj = { __fd = assert(cell.call(sockets_fd, "connect", self, addr, port), "Connect failed") }
+	local obj = { __fd = assert(cell.call(sockets_fd, "connect", self, addr, port), "Connect failed"),__opts = opts}
+	socket_opts[obj.__fd] =  opts
 	return setmetatable(obj, socket_meta)
 end
 
-function cell.open(port,accepter)
+function cell.open(port,accepter,opts)
 	sockets_fd = sockets_fd or cell.cmd("socket")
-	local obj = { __fd = assert(cell.call(sockets_fd, "open", self, port), "Open failed") }
-	sockets_udp[obj.__fd]=function(fd,len,msg,peer_ip,peer_port)
-		accepter(fd,len,msg,peer_ip,peer_port)
-	end
+	local obj = { __fd = assert(cell.call(sockets_fd, "open", self, port), "Open failed"),__opts=opts }
+	sockets_udp[obj.__fd] = accepter
+	socket_opts[obj.__fd] =  opts 
 	return setmetatable(obj, socket_meta)
 end
 
-function cell.listen(port, accepter)
+function cell.listen(port, accepter,opts)
 	assert(type(accepter) == "function")
 	sockets_fd = sockets_fd or cell.cmd("socket")
-	local obj = { __fd = assert(cell.call(sockets_fd, "listen", self, port), "Listen failed") }
+	local obj = { __fd = assert(cell.call(sockets_fd, "listen", self, port), "Listen failed"),__opts=opts }
+	socket_opts[obj.__fd] =  opts
 	sockets_accept[obj.__fd] =  function(fd, addr)
 		return accepter(fd, addr, obj)
 	end
@@ -369,8 +391,19 @@ cell.dispatch {
 		end
 		local udp = sockets_udp[fd]
 		if udp then
-		       udp(fd,sz,msg,...)
-		       return
+		   if socket_opts[fd] and socket_opts[fd].protocol == "text" then
+		      local co = coroutine.create(function()
+						     local buffer,bsz = csocket.push(sockets[fd],msg,sz)
+						     sockets[fd] = buffer
+						     udp()
+						     return "EXIT"
+		      end)
+		      suspend(nil, nil, co, coroutine.resume(co))
+		      return
+		   else
+		      udp(fd,msg,sz)
+		   end
+		   return 
 		end
 		local ev = sockets_event[fd]
 		sockets_event[fd] = nil
@@ -463,7 +496,7 @@ cell.dispatch {
 			print("Unknown message ", cmd)
 		else
 			local co = coroutine.create(function(...) return "EXIT", f(...) end)
-			suspend(source, session, co, coroutine.resume(co,...))
+			suspend(nil,nil, co, coroutine.resume(co,...))
 		end
 	end
 }

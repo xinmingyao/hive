@@ -1,9 +1,9 @@
 
 package.path = package.path .. ";./hive/?.lua"
+local http = require "protocol.http"
 local cell = require "cell"
 local msgpack = require "cell.msgpack"
 local binlib =  require "cell.binlib"
-local http = require "http"
 local function accepter(fd, addr, listen_fd)
 	print("Accept from ", listen_fd)
 	-- can't read fd in this function, because socket.cell haven't forward data from fd
@@ -12,8 +12,8 @@ local function accepter(fd, addr, listen_fd)
 	return client
 end
 
-local gui = sraw.create()
-gui[1]="test"
+--local gui = sraw.create()
+--gui[1]="test"
 local p = msgpack.pack({"msgpack",2})
 local up =msgpack.unpack(p)
 print(333333333)
@@ -38,11 +38,12 @@ function cell.main()
 	-- save listen_fd for prevent gc.
 	--cell.listen("127.0.0.1:8888",accepter)
 	--cell.open(9998,udp)
-    local u =msgpack.pack({channel_id,"join_share",123,"tmp"})
-    local len = string.len(u)
-    local u1 = binlib.pack("A",u)
-    local l = msgpack.unpack(u)
-    print("*******",l[2])
+	local channel_id = 1
+	local u =msgpack.pack({channel_id,"join_share",123,"tmp"})
+	local len = string.len(u)
+	local u1 = binlib.pack("A",u)
+	local l = msgpack.unpack(u)
+	print("*******",l[2])
 --[[
 	local sock = cell.connect("localhost", 8088)	
 	local u =msgpack.pack({"test","pwd"})
@@ -65,7 +66,7 @@ function cell.main()
 
 	print("monitor:",monitor)
 	print(cell.cmd("echo","Hello world"))
-	local ping, pong = cell.cmd("launch", "test.pingpong","pong",gui)
+	local ping, pong = cell.cmd("launch", "test.pingpong","pong","gui")
 	print("----",ping,pong)
 	cell.monitor(ping)
 	print(cell.call(ping, "ping"))
@@ -79,7 +80,22 @@ function cell.main()
 		cell.sleep(100)
 		print("loop:",i)
 	end
-	print(cell.call(ping,"sleep",300))
-	print("self:",cell.self)
+--	print(cell.call(ping,"sleep",300))
+--	print("self:",cell.self)
+	local sip_app = {local_uri = "192.168.203.157",port = 5060,id="server",username="test",realm="ttt"}
+	local sip = cell.cmd("launch","hive.sip",sip_app)
+	cell.call(sip,"start")
+	cell.call(sip,"listen",cell.self)
 --	cell.exit()
 end
+
+cell.message {
+   handle_sip =function(ok,rep,handle)
+      print("receive sip",ok,rep,handle)
+      if ok then
+	 local service = handle.service
+	 local rep = {status = 200,header={}}
+	 cell.send(service,"reply",handle,rep)
+      end
+   end
+}

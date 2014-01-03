@@ -100,7 +100,7 @@ end
 -- @return A random string of length <code>len</code> consisting of
 -- characters from <code>charset</code> if one was provided, otherwise
 -- <code>charset</code> defaults to [A-Z] letters.
-function generate_random_string(len, charset)
+local function generate_random_string(len, charset)
   local t = {}
   local ascii_A = 65
   local ascii_Z = 90
@@ -116,53 +116,7 @@ function generate_random_string(len, charset)
   return table.concat(t)
 end
 
---- Return a wrapper closure around a socket that buffers socket reads into
--- chunks separated by a pattern.
--- 
--- This function operates on a socket attempting to read data. It separates the
--- data by <code>sep</code> and, for each invocation, returns a piece of the
--- separated data. Typically this is used to iterate over the lines of data
--- received from a socket (<code>sep = "\r?\n"</code>). The returned string
--- does not include the separator. It will return the final data even if it is
--- not followed by the separator. Once an error or EOF is reached, it returns
--- <code>nil, msg</code>. <code>msg</code> is what is returned by
--- <code>nmap.receive_lines</code>.
--- @param socket Socket for the buffer.
--- @param sep Separator for the buffered reads.
--- @return Data from socket reads or <code>nil</code> on EOF or error.
--- @return Error message, as with <code>receive_lines</code>.
-function make_buffer(socket, sep)
-  local point, left, buffer, done, msg = 1, "";
-  local function self()
-    if done then
-      return nil, msg; -- must be nil for stdnse.lines (below)
-    elseif not buffer then
-      local status, str = socket:receive();
-      if not status then
-        if #left > 0 then
-          done, msg = not status, str;
-          return left;
-        else
-          return status, str;
-        end
-      else
-        buffer = left..str;
-        return self();
-      end
-    else
-      local i, j = buffer:find(sep, point);
-      if i then
-        local ret = buffer:sub(point, i-1);
-        point = j + 1;
-        return ret;
-      else
-        point, left, buffer = 1, buffer:sub(point), nil;
-        return self();
-      end
-    end
-  end
-  return self;
-end
+
 
 --[[ This function may be usable in Lua 5.2
 function lines(socket)
@@ -193,7 +147,7 @@ do
 -- becomes "1100").
 -- @param n Number to convert.
 -- @return String in binary format.
-  function tobinary(n)
+local  function tobinary(n)
     assert(tonumber(n), "number expected");
     return (("%x"):format(n):gsub("%w", t):gsub("^0*", ""));
   end
@@ -203,7 +157,7 @@ end
 -- becomes "14").
 -- @param n Number to convert.
 -- @return String in octal format.
-function tooctal(n)
+local function tooctal(n)
   assert(tonumber(n), "number expected");
   return ("%o"):format(n)
 end
@@ -225,7 +179,7 @@ end
 -- @param s String or number to be encoded.
 -- @param options Table specifiying formatting options.
 -- @return String in hexadecimal format.
-function tohex( s, options ) 
+local function tohex( s, options ) 
   options = options or EMPTY
   local separator = options.separator
   local hex
@@ -260,7 +214,7 @@ end
 --@param string The base string.
 --@param blank  The string to return if <code>string</code> was blank
 --@return Either <code>string</code> or, if it was blank, <code>blank</code>
-function string_or_blank(string, blank)
+local function string_or_blank(string, blank)
   if(string == nil or string == "") then
     if(blank == nil) then
       return "<blank>"
@@ -294,7 +248,7 @@ end
 -- @param timespec A time specification string.
 -- @return A number of seconds, or <code>nil</code> followed by an error
 -- message.
-function parse_timespec(timespec)
+local function parse_timespec(timespec)
   if timespec == nil then return nil, "Can't parse nil timespec" end
   local n, unit, t, m
   local multipliers = {[""] = 1, s = 1, m = 60, h = 60 * 60, ms = 0.001}
@@ -344,7 +298,7 @@ end
 -- <code>
 -- date_to_timestamp({year=1970,month=1,day=1,hour=4,min=0,sec=0}, 1*60*60) --> 10800
 -- </code>
-function date_to_timestamp(date, offset)
+local function date_to_timestamp(date, offset)
   offset = offset or 0
   return os.time(date) + utc_offset(os.time(date)) - offset
 end
@@ -386,7 +340,7 @@ end
 --
 -- This function should be used for all dates emitted as part of NSE structured
 -- output.
-function format_timestamp(t, offset)
+local function format_timestamp(t, offset)
   local tz_string = format_tz(offset)
   offset = offset or 0
   return os.date("!%Y-%m-%dT%H:%M:%S", t + offset) .. tz_string
@@ -402,7 +356,7 @@ end
 -- * -2y177d10h13m20s
 -- The string shows <code>t2</code> relative to <code>t1</code>; i.e., the
 -- calculation is <code>t2</code> minus <code>t1</code>.
-function format_difftime(t2, t1)
+local function format_difftime(t2, t1)
   local d, s, sign, yeardiff
 
   d = difftime(time(t2), time(t1))
@@ -562,7 +516,7 @@ end
 --              nil when callling from a script. 
 -- @return <code>nil</code>, if <code>data</code> is empty, otherwise a
 -- multiline string.
-function format_output(status, data, indent)
+local function format_output(status, data, indent)
   -- If data is nil, die with an error (I keep doing that by accident)
   assert(data, "No data was passed to format_output()")
 
@@ -760,7 +714,7 @@ do end -- no function here, see nse_main.lua
 --@param port a port structure containing keys port number(number) and protocol(string)
 --@param port_range a port range string in Nmap standard format (ex. "T:80,1-30,U:31337,21-25")
 --@returns boolean indicating whether the port is in the port range
-function in_port_range(port,port_range)
+local function in_port_range(port,port_range)
 	assert(port and type(port.number)=="number" and type(port.protocol)=="string" and 
 			(port.protocol=="udp" or port.protocol=="tcp"),"Port structure missing or invalid: port={ number=<port_number>, protocol=<port_protocol> }")
 	assert((type(port_range)=="string" or type(port_range)=="number") and port_range~="","Incorrect port range specification.")
@@ -835,7 +789,7 @@ end
 --   _ENV = stdnse.module(name, stdnse.seeall, require "strict");
 -- @param name The module name.
 -- @param ... Option functions which modify the environment of the module.
-function module (name, ...)
+local function module (name, ...)
   local env = {};
   env._NAME = name;
   env._PACKAGE = name:match("(.+)%.[^.]+$");
@@ -856,7 +810,7 @@ end
 -- @usage
 --  _ENV = stdnse.module(name, stdnse.seeall);
 -- @param env Environment to change.
-function seeall (env)
+local function seeall (env)
   local m = getmetatable(env) or {};
   m.__index = _G;
   setmetatable(env, m);
@@ -873,7 +827,7 @@ end
 -- then doing another assignment will move the key to the end of the order.
 --
 -- @return An ordered table.
-function output_table ()
+local function output_table ()
   local t = {}
   local order = {}
   local function iterator ()
@@ -918,7 +872,7 @@ end
 --
 -- @args obj The object to pretty print.
 -- @args printer The printer function.
-function pretty_printer (obj, printer)
+local function pretty_printer (obj, printer)
   if printer == nil then printer = print end
 
   local function aux (obj, spacing)
@@ -965,7 +919,7 @@ local FILESYSTEM_UNSAFE = "[^a-zA-Z0-9._-]"
 -- <code>encodeURIComponent</code>, except that fewer bytes are
 -- whitelisted, and it works on bytes, not Unicode characters or UTF-16
 -- code points.
-function filename_escape(s)
+local function filename_escape(s)
   if s == "." then
     return "%2e"
   elseif s == ".." then
