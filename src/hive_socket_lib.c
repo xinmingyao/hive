@@ -20,6 +20,9 @@
 #define STATUS_HALFCLOSE 1
 #define STATUS_SUSPEND 2
 
+#define EVENT_READ 1
+#define EVENT_WRITE 2
+
 struct write_buffer {
 	struct write_buffer * next;
 	char *ptr;
@@ -37,6 +40,8 @@ struct socket {
 	struct write_buffer * head;
 	struct write_buffer * tail;
 	int stype; //socket type
+  int ssl_type;
+  int ssl_state;
 };
 
 struct socket_pool {
@@ -143,6 +148,8 @@ new_socket(struct socket_pool *p, int sock,int stype) {
 			s->fd = sock;
 			s->id = id;
 			s->stype = stype;
+			s->ssl_type = 0;
+			s->ssl_state = 0;
 			p->count++;
 			p->id = id + 1;
 			if (p->id > MAX_ID) {
@@ -379,6 +386,20 @@ push_result(lua_State *L, int idx, struct socket *s, struct socket_pool *p) {
 }
 
 static int
+push_ssl_event(lua_State *L, int idx, struct socket *s, struct socket_pool *p,int event) {
+  int ret = 0; 
+  result_n(L, idx);
+  ++ret;
+  ++idx;
+  lua_pushinteger(L, s->id);
+  lua_rawseti(L, -2, 1);
+  lua_pushinteger(L, event);
+  lua_rawseti(L, -2, 2);
+  lua_pop(L,1);
+  return ret;
+}
+
+static int
 accept_result(lua_State *L, int idx, struct socket *s, struct socket_pool *p) {
 	int ret = 0;
 	for (;;) {
@@ -473,15 +494,23 @@ lpoll(lua_State *L) {
 			if (s->listen) {
 				t += accept_result(L, t, e->s, p);
 			} else {
-				t += push_result(L, t, e->s, p);
+			  if(s->ssl_type >=1 && s->ssl_state == LHIVE_STATE_NEW) {// 4 ssl handshake
+			    t+= push_ssl_event(L,t,e->s,p,EVENT_READ);
+			  }else{
+			    t += push_result(L, t, e->s, p);
+			  }
 			}
 		}
 		if (e->write) {
-			struct socket *s = e->s;
-			sendout(p, s);
-			if (s->status == STATUS_HALFCLOSE && s->head == NULL) {
-				force_close(s, p);
-			}
+		  struct socket *s = e->s;
+		  if(s->ssl_type >=1 && s->ssl_state == LHIVE_STATE_NEW) {// 4 ssl handshake
+			    t+= push_ssl_event(L,t,e->s,p,EVENT_WRITE);
+		  }else{
+		    sendout(p, s);
+		    if (s->status == STATUS_HALFCLOSE && s->head == NULL) {
+		      force_close(s, p);
+		    }
+		  }
 		}
 	}
 
