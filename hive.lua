@@ -1,6 +1,5 @@
 local c = require "hivecore"
-package.path = package.path .. ";./test/?.lua;./?.lua"
-print(package.path)
+package.path = package.path .. ";./test/?.lua;./?.lua;./ssl/?.lua"
 local system_cell = assert(package.searchpath("hive.system", package.path),"system cell was not found")
 
 local hive = {}

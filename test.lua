@@ -1,4 +1,5 @@
-package.cpath = package.cpath .. ";./?.dylib"
+package.cpath = package.cpath ..";./ssl/?.so".. ";./?.dylib"
+package.path = package.path .. ";./ssl/?.lua"
 local main = ...
 local hive = require "hive"
 if not main then

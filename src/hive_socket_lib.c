@@ -143,7 +143,7 @@ new_socket(struct socket_pool *p, int sock,int stype) {
 			s->status = STATUS_SUSPEND;
 			s->listen = 0;
 			sp_nonblocking(sock);
-			int keepalive = 1; 
+			int keepalive = 1;
 			setsockopt(sock, SOL_SOCKET, SO_KEEPALIVE, (void *)&keepalive , sizeof(keepalive));
 			s->fd = sock;
 			s->id = id;
@@ -207,7 +207,8 @@ lconnect(lua_State *L) {
 
 	int fd = new_socket(pool, sock,SOCK_STREAM);
 	lua_pushinteger(L,fd);
-	return 1;
+	lua_pushinteger(L,sock);
+	return 2;
 }
 
 static int
@@ -251,9 +252,10 @@ lopen(lua_State *L) {
 	}
 	int fd = new_socket(pool, sock,SOCK_DGRAM);
 	lua_pushinteger(L,fd);
+	lua_pushinteger(L,sock);
 	int reuse = 1;
 	setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, (void *)&reuse, sizeof(int));
-	return 1;
+	return 2;
 }
 static void
 force_close(struct socket *s, struct socket_pool *p) {
@@ -274,6 +276,50 @@ force_close(struct socket *s, struct socket_pool *p) {
 	--p->count;
 }
 
+static lconnect_udp(lua_State *L){
+  int id = luaL_checknumber(L,1);
+  const char * ip = luaL_checkstring(L,2);
+  int * port = luaL_checkinteger(L,3);
+  struct socket_pool * p = get_sp(L);
+  struct socket * s = p->s[id % p->cap];
+  if (id != s->id) {
+    return luaL_error(L, "Close invalid socket %d", id);
+  }
+  int status;
+  struct sockaddr_in servaddr;
+  memset(&servaddr,0,sizeof(servaddr));
+  servaddr.sin_port = htons(port);
+  if (inet_pton(AF_INET,ip,&servaddr.sin_addr)<=0)
+    {
+      printf("error");
+    }
+  
+  status = connect(s,&servaddr,sizeof(servaddr));
+  printf ("connect %d\n",status);
+  if ( status	!= 0 ) {
+    printf ("%s\n","sssss");
+    return luaL_error(L, "connect peer error %s %s", ip,port);
+  }
+
+  return 0;
+}
+static lioctl(lua_State *L){
+  struct socket_pool * p = get_sp(L);
+  int id = luaL_checkinteger(L,1);
+  struct socket * s = p->s[id % p->cap];
+  if (id != s->id) {
+    return luaL_error(L, "Close invalid socket %d", id);
+  }
+  int type = luaL_checkinteger(L,2);
+  int state = luaL_checkinteger(L,3);
+  if (type == 1){
+    s->ssl_type = SSL_DTLS;
+    s->ssl_state = state;
+  }else{
+    return luaL_error(L,"not support type %d",type);
+  }
+  return 0;
+}
 static int
 lclose(lua_State *L) {
 	struct socket_pool * p = get_sp(L);
@@ -328,9 +374,9 @@ remove_after_n(lua_State *L, int n) {
 static int
 push_result(lua_State *L, int idx, struct socket *s, struct socket_pool *p) {
 	int ret = 0;
-	struct sockaddr_in addr; 
-	memset(&addr, 0, sizeof(struct sockaddr_in)); 
-	int addr_len = sizeof(struct sockaddr_in); 
+	struct sockaddr_in addr;
+	memset(&addr, 0, sizeof(struct sockaddr_in));
+	int addr_len = sizeof(struct sockaddr_in);
 	for (;;) {
 		char * buffer = malloc(READ_BUFFER);
 		int r = 0;
@@ -340,7 +386,7 @@ push_result(lua_State *L, int idx, struct socket *s, struct socket_pool *p) {
 			} else {
 				r = recvfrom(s->fd,buffer,READ_BUFFER,0,(struct sockaddr *)&addr ,&addr_len);
 			}
-			
+
 			if (r == -1) {
 				switch(errno) {
 				case EAGAIN:
@@ -387,7 +433,7 @@ push_result(lua_State *L, int idx, struct socket *s, struct socket_pool *p) {
 
 static int
 push_ssl_event(lua_State *L, int idx, struct socket *s, struct socket_pool *p,int event) {
-  int ret = 0; 
+  int ret = 0;
   result_n(L, idx);
   ++ret;
   ++idx;
@@ -484,7 +530,7 @@ lpoll(lua_State *L) {
 		luaL_checktype(L,2,LUA_TTABLE);
 	}
 
-	int n = sp_wait(p->fd, p->ev, MAX_EVENT, timeout); 
+	int n = sp_wait(p->fd, p->ev, MAX_EVENT, timeout);
 	int i;
 	int t = 1;
 	for (i=0;i<n;i++) {
@@ -563,7 +609,7 @@ lsend(lua_State *L) {
 	char * ptr = msg;
 
 	for (;;) {
-		int wt;	
+		int wt;
 		if (s->stype == SOCK_DGRAM) {
 			struct sockaddr_in my_addr;
 			memset(&my_addr, 0, sizeof(struct sockaddr_in));
@@ -730,7 +776,7 @@ lpop(lua_State *L) {
 	if (bytes == 0) {
 		buffer->head = buffer->tail = 0;
 	}
-	
+
 	return 2;
 }
 
@@ -875,16 +921,17 @@ llisten(lua_State *L) {
 	}
 
 	lua_pushinteger(L, id);
-
-	return 1;
+	lua_pushinteger(L,listen_fd);
+	return 2;
 }
 
-int 
+int
 socket_lib(lua_State *L) {
 	luaL_checkversion(L);
 	luaL_Reg l[] = {
 		{ "init", linit },
 		{ "connect", lconnect },
+		{ "connect_udp", lconnect_udp },
 		{ "close", lclose },
 		{ "poll", lpoll },
 		{ "send", lsend },
@@ -895,6 +942,7 @@ socket_lib(lua_State *L) {
 		{ "readline", lreadline },
 		{ "listen", llisten },
 		{ "open",lopen},
+		{ "ioctl",lioctl},
 		{ NULL, NULL },
 	};
 	luaL_newlibtable(L,l);

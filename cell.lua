@@ -1,6 +1,6 @@
 --package.path = package.path .. ";./hive/?.lua;./?.lua"
 --forbid global varible
-----[[
+--[[
 mt={} 
 mt.__index=function(t,k) 
    if not(mt[k]) then 
@@ -17,14 +17,15 @@ mt.__newindex=function(t,k,v)
    end 
 end 
 setmetatable(_G,mt) 
---]]
+]]
+local ssl = require("ssl")
 
 local c = require "cell.c"
 local csocket = require "cell.c.socket"
 
 local msgpack = require "cell.msgpack"
-
-
+local binlib = require "cell.binlib"
+local t = binlib.pack("III",1,1,2)
 local coroutine = coroutine
 local assert = assert
 local select = select
@@ -228,6 +229,8 @@ local listen_socket = {}
 local socket_opts = {}
 local rpc = {}
 local rpc_head = {}
+
+local socket_ssl = {}
 local function close_msg(self)
 	cell.send(sockets_fd, "disconnect", self.__fd)
 end
@@ -249,6 +252,7 @@ local listen_meta = {
 }
 
 
+
 --todo:
 function listen_socket:disconnect()
 	sockets_accept[self.__fd] = nil
@@ -257,14 +261,25 @@ end
 
 function cell.connect(addr, port,opts)
 	sockets_fd = sockets_fd or cell.cmd("socket")
-	local obj = { __fd = assert(cell.call(sockets_fd, "connect", self, addr, port), "Connect failed"),__opts = opts}
+	local fd,sockfd = cell.call(sockets_fd, "connect", self, addr, port)
+	assert(fd, "Connect failed")
+	local obj = { __fd = fd,__sockfd = sockfd ,__opts = opts}
 	socket_opts[obj.__fd] =  opts
 	return setmetatable(obj, socket_meta)
 end
-
+function cell.connect_udp(...)
+   sockets_fd = sockets_fd or cell.cmd("socket")
+   cell.call(sockets_fd, "connect_udp", self, ...)
+end
+function cell.ioctl(...)
+   sockets_fd = sockets_fd or cell.cmd("socket")
+   cell.call(sockets_fd, "ioctl", self, ...)
+end
 function cell.open(port,accepter,opts)
 	sockets_fd = sockets_fd or cell.cmd("socket")
-	local obj = { __fd = assert(cell.call(sockets_fd, "open", self, port), "Open failed"),__opts=opts }
+	local fd,sockfd = cell.call(sockets_fd, "open", self, port)
+	assert(fd, "Open failed")
+	local obj = { __fd = fd,__sockfd=sockfd,__opts=opts }
 	sockets_udp[obj.__fd] = accepter
 	socket_opts[obj.__fd] =  opts 
 	return setmetatable(obj, socket_meta)
@@ -273,7 +288,9 @@ end
 function cell.listen(port, accepter,opts)
 	assert(type(accepter) == "function")
 	sockets_fd = sockets_fd or cell.cmd("socket")
-	local obj = { __fd = assert(cell.call(sockets_fd, "listen", self, port), "Listen failed"),__opts=opts }
+	local fd,sockfd = cell.call(sockets_fd, "listen", self, port)
+	assert(fd, "Listen failed")
+	local obj = { __fd = fd,__sockfd=sockfd,__opts=opts }
 	socket_opts[obj.__fd] =  opts
 	sockets_accept[obj.__fd] =  function(fd, addr)
 		return accepter(fd, addr, obj)
@@ -286,6 +303,83 @@ function cell.bind(fd)
 	local obj = { __fd = fd }
 	return setmetatable(obj, socket_meta)
 end
+
+-- ssl start
+
+--#define SSL_ERROR_NONE			0
+--#define SSL_ERROR_SSL			1
+--#define SSL_ERROR_WANT_READ		2
+--#define SSL_ERROR_WANT_WRITE		3
+--#define SSL_ERROR_WANT_X509_LOOKUP	4
+--#define SSL_ERROR_SYSCALL		5 /* look at error stack/return value/errno */
+--#define SSL_ERROR_ZERO_RETURN		6
+--#define SSL_ERROR_WANT_CONNECT		7
+--#define SSL_ERROR_WANT_ACCEPT		8
+
+function socket:dtls_open(cfg)
+   local fd = self.__fd
+   
+  -- self.__opts.ssl="dtls"
+   local sockfd = self.__sockfd
+   print(sockfd,cfg)
+   local s,msg = ssl.wrap_nonblock(sockfd,cfg)
+   if s then
+      socket_ssl[fd]= {type="dtls",ssl=s,state="new",mode=cfg.mode} --sever or client
+      cell.ioctl(fd,1,1) --new
+      return "ok"
+   else
+      return "error",msg
+   end
+end
+
+function socket:dtls_listen(cfg)
+   print(cfg)
+   return socket.dtls_open(self,cfg)
+end
+
+function socket:dtls_connect(cfg,ip,port)
+   local fd = self.__fd
+   print("---",type(fd),ip,port)
+   cell.connect_udp(fd,ip,port)
+   if socket.dtls_open(self,cfg) then
+      local r,msg =  do_handshake(fd)
+      if r then
+	 cell.ioctl(fd,1,2) --completed
+	 return r
+      else
+	 return r,msg
+      
+      end
+   end
+end
+local function handshake_wait(fd)
+   assert(sockets_event[fd] == nil)
+   sockets_event[fd] = cell.event()
+   cell.wait(sockets_event[fd])
+end
+
+function do_handshake(fd)
+   local ssl_info = socket_ssl[fd]
+   assert(ssl_info,"no ssl")
+   local ssl_socket = ssl_info.ssl
+   print(ssl_socket)
+   local err
+   while true do
+      err = ssl_socket:dohandshake_nonblock()
+      print(err)
+      if err == 0 then
+	 return "ok" 
+      elseif err==2  then
+	 handshake_wait(fd)
+      elseif err==3  then
+	 handshake_wait(fd)
+      else
+	 return "error",err
+      end
+   end
+end
+
+-- ssl end
 function socket:rpc(rpc_funs)
 	rpc[self.__fd] = rpc_funs
 end
@@ -391,6 +485,26 @@ cell.dispatch {
 		end
 		local udp = sockets_udp[fd]
 		if udp then
+		   local ssl_s = socket_ssl[fd]
+		   if msg == nil then --ssl event
+		      assert(ssl_s,"must for ssl")		      
+		      if ssl_s.mode == "server" and ssl_s.state == "new" then
+			 ssl_s.state ="handshake"
+			 do_handshake(fd)			 
+			 return
+		      else
+			 cell.resume(sockets_event[fd])
+			 return
+		      end
+		   end
+		   if ssl_s and ssl_s.state == "completed" then
+		      if ssl_s.cipher_type == "srtp" then
+			 print("-----------",msg)
+			 -- msg,sz = srtp.decode(msg,sz)
+		      else
+			 assert(nil,"not support")
+		      end
+		   end
 		   if socket_opts[fd] and socket_opts[fd].protocol == "text" then
 		      local co = coroutine.create(function()
 						     local buffer,bsz = csocket.push(sockets[fd],msg,sz)
@@ -401,7 +515,13 @@ cell.dispatch {
 		      suspend(nil, nil, co, coroutine.resume(co))
 		      return
 		   else
-		      udp(fd,msg,sz)
+		      local peer_ip,peer_port = ...
+		      local co = coroutine.create(function()
+						     cell.send(udp,"accept_udp",msg,sz,peer_ip,peer_port)
+						     return "EXIT"
+		      end)
+		      suspend(nil, nil, co, coroutine.resume(co))
+		      return
 		   end
 		   return 
 		end
@@ -561,5 +681,13 @@ function cell.monitor(service)
 	    print("no monitor serivce!")
 	 end
       end
+end
+
+function cell.write_fd(fd,msg,...)
+   local sz,msg=csocket.sendpack(msg)
+   cell.rawsend(sockets_fd, 6, fd,sz,msg,...)
+end
+function cell.init()
+   sockets_fd = sockets_fd or cell.cmd("socket")
 end
 return cell

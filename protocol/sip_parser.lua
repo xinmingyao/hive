@@ -1,6 +1,7 @@
 --some code from nmap
 --
 --local cell = require "cell"
+local lpeg = require "lpeg"
 local text_protocol = require "protocol.text_protocol"
 local hive_lib = require "hive.hive_lib"
 local Method = {
@@ -365,5 +366,50 @@ function sip_parser.parse_sip(socket)
    return false,"sip message not valid:" ..  first
 end
 
+local R, S, V, P = lpeg.R, lpeg.S, lpeg.V, lpeg.P
+local C, Ct, Cmt, Cg, Cb, Cc = lpeg.C, lpeg.Ct, lpeg.Cmt, lpeg.Cg, lpeg.Cb, lpeg.Cc
+function sip_parser.space(pat) 
+   local sp = P" "^0
+   return sp * pat *sp 
+end
+
+function sip_parser.parse_name_addr(s)
+
+   local l = {}
+   lpeg.locale(l)
+   local sp = l.space^0
+   local display_name =sip_parser.space((l.print - P"<")^0)
+   local userinfo = (l.print - P"@")^0
+   local hostport = C((l.print- S":>")^1) *(P":" * C(l.digit^1))^0
+   local scheme = P"sips" + P"sip"
+   local sip_uri = C(scheme) * ":" * C(userinfo) * P"@" * hostport         
+   local addr_spec = sip_uri --  + absolute_uri
+   local name_addr = Ct(C(display_name^-1) * P"<" * sip_uri * P">")
+   local t = name_addr:match(s)
+   if not t then
+      return nil
+   end
+   local r = {}
+   local index = 0
+   if t[1] == "sip" or t[1]== "sips" then
+   else
+      index = index +1
+   end
+   r.display_name = t[index]
+   r.scheme = t[index+1]
+   r.name = t[index+2]
+   r.ip = t[index+3]
+   if t[index+4] then
+      r.port = 0 + t[index+4]
+   else
+      r.port = 5060
+   end
+   return r
+end
+
+function sip_parser.test()
+   l = sip_parser.parse_name_addr("name <sips:test@192.168.2.1:5061>")
+   print(l.scheme)
+end
 
 return sip_parser

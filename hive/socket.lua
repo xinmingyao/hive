@@ -8,26 +8,31 @@ local message = {}
 local sockets = {}
 
 function command.connect(source,addr,port)
-	local fd = csocket.connect(addr, port)
+	local fd,sockfd = csocket.connect(addr, port)
 	if fd then
 		sockets[fd] = source
-		return fd
+		return fd,sockfd
 	end
 end
-
+function command.connect_udp(source,fd,ip,port)
+   return csocket.connect_udp(fd,ip,port)
+end
+function command.ioctl(source,...)
+   return csocket.ioctl(...)
+end
 function command.open(source,port)
-	local fd = csocket.open(port)
+	local fd ,sockfd= csocket.open(port)
 	if fd then
 		sockets[fd] = source
-		return fd
+		return fd,sockfd
 	end
 end
 
 function command.listen(source, port)
-	local fd = csocket.listen(port)
+	local fd,sockfd = csocket.listen(port)
 	if fd then
 		sockets[fd] = source
-		return fd
+		return fd,sockfd
 	end
 end
 

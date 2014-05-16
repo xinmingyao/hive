@@ -19,15 +19,10 @@ local up =msgpack.unpack(p)
 print(333333333)
 print(up)
 print(up[1])
-
+local udp
 --print("--------",win_handle)
 --win_handle["test"] = "win_handle hello world"
-local function udp(fd,len,msg,peer_ip,peer_port)
-      local obj=cell.bind(fd)
-      obj:write(p,peer_ip,peer_port)
-      print("receive from ",peer_ip,peer_port)
 
-end
 
 function cell.main()
 	local monitor = cell.cmd("launch","hive.simplemonitor")
@@ -37,7 +32,8 @@ function cell.main()
 	print("#######",rep.status,rep.body)
 	-- save listen_fd for prevent gc.
 	--cell.listen("127.0.0.1:8888",accepter)
-	--cell.open(9998,udp)
+	udp = cell.open(9998,cell.self)
+	print("-----------",udp)
 	local channel_id = 1
 	local u =msgpack.pack({channel_id,"join_share",123,"tmp"})
 	local len = string.len(u)
@@ -69,6 +65,7 @@ function cell.main()
 	local ping, pong = cell.cmd("launch", "test.pingpong","pong","gui")
 	print("----",ping,pong)
 	cell.monitor(ping)
+	cell.monitor(cell.self)
 	print(cell.call(ping, "ping"))
 	cell.fork(function()
 		-- kill ping after 9 second
@@ -97,5 +94,10 @@ cell.message {
 	 local rep = {status = 200,header={}}
 	 cell.send(service,"reply",handle,rep)
       end
+   end,
+   accept_udp = function(msg,len,peer_ip,peer_port)
+      --local obj=cell.bind(fd)
+      --obj:write(p,peer_ip,peer_port)
+      print("receive from ",peer_ip,peer_port)
    end
 }

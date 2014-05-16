@@ -1,6 +1,7 @@
 local cell = require "cell"
 local sip_parser = require "protocol.sip_parser"
 local hive_lib = require "hive.hive_lib"
+local md5 = require "md5.md5"
 local T1 = 500 -- ms
 local timeA = 2 * T1
 local timeB = timeA * 64
@@ -431,9 +432,11 @@ local function build_header(method,branch,from,to,headers)
    for k,v in pairs(headers) do
       h[k] = v --copy k v
    end
-   h["From"] = string.format("<sip:%s>;tag=%d",from,get_totag())
-   h["To"] = string.format("<sip:%s>",to)
-   local _,ip,port = sip_parser.p_uri(from)
+   h["From"] = string.format("%s;tag=%d",from,get_totag())
+   h["To"] = to
+   local t  = sip_parser.parse_name_addr(from)
+   local ip = t.ip
+   local port = t.port
    if port and port ~=5060 then 
       h["Via"] = string.format("SIP/2.0 %s:%s;branch=%d",ip,port,branch)
    else
@@ -441,7 +444,7 @@ local function build_header(method,branch,from,to,headers)
    end
    h["Call-ID"] = sip_app.id
    h["CSeq"] = string.format("%d %s",1,method)
-   h["Contact"] =  string.format("<sip:%s>",from)
+   h["Contact"] =  string.format("<%s:%s@%s:%s>",t.scheme,t.name,t.ip,t.port)
    return h
 end
 
@@ -463,9 +466,16 @@ local function start_server_tx(req)
    coroutine.resume(co,branch,req)
 end
 
-local function  wait_uas(method,tu,from,to,uri,headers,body)
+local function  wait_uas(method,tu,from,to,headers,body)
    local ok,req,rep
-   local f 
+   local uri
+   local addr = sip_parser.parse_name_addr(to)
+   local f
+   print("33333",to,addr.scheme)
+   if headers.routes then
+   else
+      uri = string.format("%s:%s@%s:%s",addr.scheme,addr.name,addr.ip,addr.port)
+   end
    if method == sip_parser.method.INVITE then
       f = invite_client_tx 
    else 
@@ -566,8 +576,13 @@ cell.command { --tu,to,uri,headers,body
 	    local ok,auth = sip_parser.parse_auth(rep.header["WWW-Authenticate"])
 	    assert(ok)
 	    local response = "12345678"
-	    headers["Authorization"] = string.format("Digest username=\"%s\",realm=%s,nonce=%s,uri=\"<sip:%s>\",response=\"%s\"",
-						     sip_app.username,auth.realm,auth.nonce,uri,response)   
+	    local pwd = "111111"
+	    local d1 = md5:sumhexa(string.format("%s:%s:%s",sip_app.username,auth.realm,auth.nonce))
+	    local d2 = md5:sumhexa(string.format("%s:%s","REGISTER",uri))
+	    local digest = md5:sumhexa(string.format("%s:%s",d1,d2))
+
+	    headers["Authorization"] = string.format("Digest username=\"%s\",realm=%s,nonce=%s,uri=\"<sip:%s>\",response=\"%s\",algorithm=\"MD5\"",
+						     sip_app.username,auth.realm,auth.nonce,uri,digest)   
 	    return wait_uas("REGISTER",tu,from,to,uri,headers,body)
 	 else
 	    return false,"cannot authenticate"
