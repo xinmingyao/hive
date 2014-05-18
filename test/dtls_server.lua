@@ -19,8 +19,16 @@ function cell.main()
       verify = {"peer", "fail_if_no_peer_cert"},
       options = {"all", "no_sslv2"}
    }
-   local fd = cell.open(9001)
+   local fd = cell.open(9998,cell.self)
    print(fd:dtls_listen(params))
 
    return true
 end
+
+cell.message {
+    accept_udp = function(msg,len,peer_ip,peer_port)
+      --local obj=cell.bind(fd)
+      --obj:write(p,peer_ip,peer_port)
+      print("receive from ",peer_ip,peer_port)
+   end
+}

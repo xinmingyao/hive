@@ -337,6 +337,10 @@ function socket:dtls_listen(cfg)
    return socket.dtls_open(self,cfg)
 end
 
+function socket:connect_udp(...)
+   local fd = self.__fd
+   cell.connect_udp(fd,...)	
+end
 function socket:dtls_connect(cfg,ip,port)
    local fd = self.__fd
    print("---",type(fd),ip,port)
@@ -366,14 +370,16 @@ function do_handshake(fd)
    local err
    while true do
       err = ssl_socket:dohandshake_nonblock()
-      print(err)
+      print("handshake",err)
       if err == 0 then
-	 return "ok" 
+      	 cell.ioctl(fd,1,2) --completed
+	 return "ok"  
       elseif err==2  then
 	 handshake_wait(fd)
       elseif err==3  then
 	 handshake_wait(fd)
       else
+	 print("errrrrrrrrr",err)
 	 return "error",err
       end
    end
@@ -483,18 +489,32 @@ cell.dispatch {
 			suspend(nil, nil, co, coroutine.resume(co))
 			return
 		end
+
 		local udp = sockets_udp[fd]
 		if udp then
+		   print(":::::::udp")
 		   local ssl_s = socket_ssl[fd]
 		   if msg == nil then --ssl event
 		      assert(ssl_s,"must for ssl")		      
 		      if ssl_s.mode == "server" and ssl_s.state == "new" then
 			 ssl_s.state ="handshake"
-			 do_handshake(fd)			 
+			 local co = coroutine.create(function()
+			        do_handshake(fd)			 
+				return "EXIT"
+		      	end)
+		      	suspend(nil, nil, co, coroutine.resume(co))
+			
 			 return
 		      else
-			 cell.resume(sockets_event[fd])
-			 return
+			 if sockets_event[fd] then
+			    print("handshake event:",sockets_event[fd])
+			    local ev = sockets_event[fd]
+			    sockets_event[fd] = nil		
+			    cell.wakeup(ev)
+			    return
+			  else
+			    print("no co")
+			  end
 		      end
 		   end
 		   if ssl_s and ssl_s.state == "completed" then

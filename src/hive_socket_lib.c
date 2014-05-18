@@ -279,7 +279,7 @@ force_close(struct socket *s, struct socket_pool *p) {
 static lconnect_udp(lua_State *L){
   int id = luaL_checknumber(L,1);
   const char * ip = luaL_checkstring(L,2);
-  int * port = luaL_checkinteger(L,3);
+  int port = luaL_checkinteger(L,3);
   struct socket_pool * p = get_sp(L);
   struct socket * s = p->s[id % p->cap];
   if (id != s->id) {
@@ -289,13 +289,14 @@ static lconnect_udp(lua_State *L){
   struct sockaddr_in servaddr;
   memset(&servaddr,0,sizeof(servaddr));
   servaddr.sin_port = htons(port);
+  servaddr.sin_family = AF_INET;
   if (inet_pton(AF_INET,ip,&servaddr.sin_addr)<=0)
     {
       printf("error");
     }
-  
-  status = connect(s,&servaddr,sizeof(servaddr));
-  printf ("connect %d\n",status);
+  int sockfd = socket(AF_INET,SOCK_DGRAM,0);
+  status = connect(s->fd,(struct sockaddr *)&servaddr,sizeof(servaddr));
+  printf ("connect :%s %d  %d\n",ip ,port,status);
   if ( status	!= 0 ) {
     printf ("%s\n","sssss");
     return luaL_error(L, "connect peer error %s %s", ip,port);
@@ -313,6 +314,7 @@ static lioctl(lua_State *L){
   int type = luaL_checkinteger(L,2);
   int state = luaL_checkinteger(L,3);
   if (type == 1){
+    printf ("----%d %d\n",type,state);
     s->ssl_type = SSL_DTLS;
     s->ssl_state = state;
   }else{

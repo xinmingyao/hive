@@ -27,8 +27,7 @@ local udp
 function cell.main()
 	local monitor = cell.cmd("launch","hive.simplemonitor")
 	print("[cell main]",cell.self)
-	
-	local rep = http.get_url("http://192.168.203.157/",{})
+	local rep = http.get_url("http://www.baidu.com/",{})
 	print("#######",rep.status,rep.body)
 	-- save listen_fd for prevent gc.
 	--cell.listen("127.0.0.1:8888",accepter)
