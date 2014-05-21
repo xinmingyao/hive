@@ -12,6 +12,14 @@ local space_c = function(pat)
    return sp * C(pat) *sp 
 --   return l.space^0 * pat * l.space^0
 end
+
+
+local space_cg = function(pat,key)
+   local sp = P" "^0
+   return sp * Cg(C(pat),key) *sp 
+--   return l.space^0 * pat * l.space^0
+end
+
 function sdp.space(pat) 
    local sp = P" "^0
    return sp * pat *sp 
@@ -36,7 +44,7 @@ local decimal_uchar = C(
       +(pos_digit * digit)
       +digit 
 )
-local byte = P(1) - S("\0\r\n")
+local byte = P(1) - S("\0\r\n") 
 local byte_string =  byte^1--P"0x" * l.xdigit * l.xdigit
 local text = byte_string
 local b1 = decimal_uchar - P'0' -- -P'127'
@@ -144,19 +152,19 @@ local media = alnum^1
 
 
 local proto_version = P"v=" * Cg(digit^1,"v") * crlf
-local o_field = space_c(username) 
-   * space_c(sess_id) 
-   * space_c(sess_version)
-   * space_c(nettype)
-   * space_c(addrtype)
-   * space_c(addr)
+local o_field = space_cg(username,"username") 
+   * space_cg(sess_id,"sess_id") 
+   * space_cg(sess_version,"sess_version")
+   * space_cg(nettype,"nettype")
+   * space_cg(addrtype,"addrtype")
+   * space_cg(addr,"addr")
 local origin_field =  P"o=" * Cg(Ct(o_field),"o") 
-local session_name_filed = P"s=" *Cg(space_c(text) * crlf,"s")
-local infomataion_field = P"i=" *Cg(space_c(text) * crlf,"i")
+local session_name_field = P"s=" *Cg(space_c(text) * crlf,"s")
+local information_field = P"i=" *Cg(space_c(text) * crlf,"i")
 local uri_field = P"u=" *Cg(space_c(uri) * crlf,"u")
 local email_field = P"e=" *space_c(email) * crlf
 local email_fields = Cg(Ct(email_field ^1),"e")
-local phone_field = P"p=" *space_c(phone) * crlf
+local phone_field = P"p=" * space_c(phone) * crlf
 local phone_fields = Cg(Ct(phone_field ^1),"p")
 local connection_field = P"c=" * Cg(Ct(space_c(text)^1) * crlf,"c") 
 local bandwidth_field = P"b=" * Cg(Ct(space_c(bwtype) * ":" * space_c(digit^1)) * crlf,"b")
@@ -178,7 +186,8 @@ function sdp.bnf_test()
    assert(ip4_address:match("126.0.0.1"))
    assert(ip4_address:match("192.168.0.1"))
    assert(fqdn:match("a-b.2"))
-   assert(phone:match("+2-22-33"))
+   assert(phone:match("+2-2b"))
+   assert("+2-"==C(phone):match("+2-"))
    assert(uri:match("http://www.google.com/path/hello?a=1"),"uri not match")
    assert(email:match("yao@163.com"))
    assert(email_address:match("yao@13.com"))
@@ -201,7 +210,19 @@ function sdp.bnf_test()
    print(addr:match(ip))
 -- assert(addr:match(ip)== string.len(ip)+1)
    print("----",o_field:match("test 931665148 2 IN IP4 192.0.0.1"))
-   assert(origin_field:match("o=test 931665148 2 IN IP4 192.0.0.1\r\n"),"origin fail")
+   local o1 = Ct(origin_field):match("o=test 931665148 2 IN IP4 192.0.0.1\r\n")
+   assert(o1,"origin fail")
+   assert(o1.o.addr=="192.0.0.1")
+   assert(session_name_field:match("s=QuickTime\r\n"))
+   assert(information_field:match("i=Infomation\r\n"))	
+   assert(uri_field:match("u=http:www.g.com\r\n"))
+   assert(email_field:match("e=test@g.com\r\n"))	
+   local es =Ct(email_fields):match("e=test@g.com\r\ne=test1@g.com\r\n")
+   assert(es.e[1]=="test@g.com")
+   assert(es.e[2]=="test1@g.com")
+--   local t = Ct(Cg(C(safe),"id") * space * Cg(C(safe),"name")):match("a d")
+--  local t = (safe):match("a b c")
+--   assert(phone_field:match("p=+2-22222\r\n"))		
 end
 
 sdp.bnf_test()
