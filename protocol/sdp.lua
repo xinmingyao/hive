@@ -1,4 +1,5 @@
 local lpeg = require "lpeg"
+local bnf = require "protocol.bnf"
 local R, S, V, P = lpeg.R, lpeg.S, lpeg.V, lpeg.P
 local C, Ct, Cmt, Cg, Cb, Cc = lpeg.C, lpeg.Ct, lpeg.Cmt, lpeg.Cg, lpeg.Cb, lpeg.Cc
 local Cf = lpeg.Cf
@@ -28,7 +29,7 @@ end
 local any = P(1)^1
 local crlf = P"\r\n"
 local tab =  P'\t'
-local space = l.space
+local space = P' ' --l.space
 local alpha = l.alpha
 local alnum = l.alnum
 local digit = l.digit
@@ -56,73 +57,13 @@ local fqdn = fqdn1 * fqdn1 * fqdn1 * fqdn1
 local addr =  unicast_address  + fqdn
 local addrtype = P"IP4" +P"IP6"
 local nettype = P"IN"
-local phone = P"+" * pos_digit * (space + P"-" + digit)^1
+local phone = P"+" * pos_digit * (P" " + P"-" + digit)^1
 local phone_number = phone 
    + (phone + P"(" + email_safe + P")")
    + (email_safe * P"<" * phone * P">")
---rfc1630
-function get_uri()
-   local void = P""
-   local punctuation = S("<>")
-   local national = S("{}[]\\^~")
-   local hex = l.xdigit
-   local escape = P"%" * hex * hex
-   local reserved = S("=;/#?:") + l.space
-   local extra = S("!*'\"()")
-   local safe = S("$-_@.&")
-   local digit = l.digit
-   local alpha = l.alpha
-   local xalpha = alpha + digit + safe + extra + escape
-   local xalphas = xalpha^1
-   local xpalpha = xalpha + P"+"
-   local ialpha = alpha * xalphas^-1
-   local xpalphas = xpalpha^1
-   local fragmentid = xalphas
-   local search = xalphas^1
-   local path = void 
-      + xpalphas * (P"/" * xpalphas)^0
-   local scheme = ialpha
-   local uri = scheme * P":" * path  * search^0
-   return uri
-end
-local uri = get_uri()
---rfc822
-function get_email()
-   local alpha = l.alpha
-   local digit = l.digit
-   local ctl = S("\t") --todo add ctl elements
-   local cr = P"\r"
-   local lf = P"\n"
-   local space = l.space
-   local htab = P"\t"
-   local crlf = cr * lf
-   local lwsp_char = space + htab
-   local linear_white_space = (crlf^0 * lwsp_char)^1
-   local specials = S("()<>$,;\\<.[]")
-   local delimiters = specials + linear_white_space
-   local atom = (l.alnum - space - ctl)^1
-   local text = atom
-   local qtext = atom - S('"\\') - cr
-   local quoted_string = P'"' * qtext * P'"'
-   local dtext = atom- S('[]\\') - cr
-   local quoted_pair = P"\\" * alpha
-   local domain_literal = P"[" * dtext + quoted_pair + P"]" 
-   local word = atom + quoted_string
-   local phrase = word^1
-   local domain_ref = atom
-   local sub_domain = domain_ref + domain_literal
-   local domain = sub_domain * (P"." * sub_domain)^0
-   local local_part = word * (P"." * word)^0
-   local addr_spec = local_part * P"@" * domain
 
-   local route = (P"@"*domain)^1 * P":"
-   local route_addr = P"<" * route^-1 * addr_spec * P">"
-   local mailbox = addr_spec
-      +phrase * route_addr
-   return mailbox
-end
-
-local email = get_email()
+local uri = bnf.uri()
+local email = bnf.email()
 
 local email_address = email 
    + (email * P"(" * email_safe^1 * P")")
@@ -143,7 +84,7 @@ local connection_address = multicast_address + addr
 local sess_version = digit^1
 local sess_id = digit^1
 local att_value = byte_string
-local att_field = alnum ^1
+local att_field = (safe - P":") ^1 
 local attribute =(att_field * P":" * att_value) + att_field
 local port = digit^1
 local proto = (alnum + S"/")^1
@@ -166,15 +107,28 @@ local email_field = P"e=" *space_c(email) * crlf
 local email_fields = Cg(Ct(email_field ^1),"e")
 local phone_field = P"p=" * space_c(phone) * crlf
 local phone_fields = Cg(Ct(phone_field ^1),"p")
-local connection_field = P"c=" * Cg(Ct(space_c(text)^1) * crlf,"c") 
-local bandwidth_field = P"b=" * Cg(Ct(space_c(bwtype) * ":" * space_c(digit^1)) * crlf,"b")
+local conn1 = 
+   space_cg(nettype,"nettype")
+   *space_cg(addrtype,"addrtype")
+   *space_cg(connection_address,"connection_address")
+local connection_field = P"c=" * Cg(Ct(conn1) * crlf,"c") 
+local bandwidth_field = P"b=" * Ct(space_cg(bwtype,"bwtype") * P":" * space_cg(bandwidth,"bandwidth")) * crlf,"b"
+local bandwidth_fields = Cg(Ct(bandwidth_field^1),"b")
 local time_field = P"t=" * Cg(space_c(any) * crlf,"t") --todo detail
 
 local key_field = P"k=" *Cg(space_c(text) * crlf,"k") --todo detail
-local media_field = P"m=" * space_c(media) * (space_c(port)*(P"/" * integer)^-1) * space_c(proto) * space_c(fmt) * crlf,"m"
+local media_field = P"m=" * space_cg(media,"media") * (space_cg(port,"port")*(P"/" * integer)^-1) * space_cg(proto,"proto") * space_cg(fmt,"fmt")^-1 * crlf,"m"
 
-local attr_field = P"a=" * C(attribute) * crlf
-local attr_fields = Cg(Ct(attr_field ^1),"a")
+local attribute_field = P"a=" * C(attribute) * crlf
+local attribute_fields = Cg(Ct(attribute_field ^1),"a")
+local media_description = 
+   Cg(Ct(media_field),"m") 
+ --  * Cg(information_field^-1,"infomation")
+--   * Cg(connection_field^0,"connection")
+   *Cg(Ct(bandwidth_field^1),"b")
+--   *Cg(key_field^-1,"key")
+   *Cg(Ct(attribute_field^1),"a")
+local media_descriptions = Cg(Ct(media_description^1),"m")
 
 function sdp.bnf_test()
    local du1 = "254"
@@ -209,7 +163,7 @@ function sdp.bnf_test()
    print(string.len(ip))
    print(addr:match(ip))
 -- assert(addr:match(ip)== string.len(ip)+1)
-   print("----",o_field:match("test 931665148 2 IN IP4 192.0.0.1"))
+--   print("----",o_field:match("test 931665148 2 IN IP4 192.0.0.1"))
    local o1 = Ct(origin_field):match("o=test 931665148 2 IN IP4 192.0.0.1\r\n")
    assert(o1,"origin fail")
    assert(o1.o.addr=="192.0.0.1")
@@ -222,7 +176,57 @@ function sdp.bnf_test()
    assert(es.e[2]=="test1@g.com")
 --   local t = Ct(Cg(C(safe),"id") * space * Cg(C(safe),"name")):match("a d")
 --  local t = (safe):match("a b c")
---   assert(phone_field:match("p=+2-22222\r\n"))		
+   assert(phone_field:match("p=+2-22222\r\n"))		
+   local f1 = Ct(phone_fields):match("p=+2-1\r\np=+3-1\r\n")
+   assert(f1.p[1] == "+2-1")
+   assert(f1.p[2] == "+3-1")
+   local conn = "c=IN IP4 127.0.0.1\r\n"
+   assert(connection_field:match(conn))
+   local c1 = Ct(connection_field):match(conn)
+   assert(c1.c.nettype == "IN")
+   assert(c1.c.addrtype == "IP4")   
+   assert(c1.c.connection_address == "127.0.0.1")
+   local b1 = "b=test:12\r\n\b=t2:13\r\n"
+   assert(bandwidth_field:match(b1))
+   local bt = Ct(bandwidth_fields):match(b1)
+   assert(bt.b[1].bwtype == "test")
+   assert(bt.b[1].bandwidth == "12")
+   local at = "a=rtpmap:97 H264/90000\r\na=bb:12\r\n"
+   assert(attribute_field:match(at))
+   local att = Ct(attribute_fields):match(at)
+   assert(att.a[1] == "rtpmap:97 H264/90000")
+   assert(att.a[2] == "bb:12")
+
+   local media ="m=video 0 qq 98\r\n"..
+      "b=AS:300\r\n"..
+      "a=rtpmap:97 H264/90000\r\n"..
+      "a=aesid:201\r\n"
+
+   assert(att_value:match("mpeg4-esid"))
+   local media2 = "m=audio 0 qq 97\r\n"..
+      "b=AS:300\r\n"..
+      "a=rtpmap:97 H264/90000\r\n"..
+      "a=mpeg4-esid:201\r\n"..
+      "m=audio 0 qq 97\r\n"..
+      "b=AS:300\r\n"..
+      "a=rtpmap:97 H264/90000\r\n"..
+      "a=mpeg4esid:201\r\n"
+   assert(media_description:match(media))
+   print(media_description:match(media),string.len(media))
+   local mt = Ct(media_description):match(media)
+   assert(mt.m.media=="video")
+   assert(mt.a[2]=="aesid:201")
+   print(mt.b[1].bandwidth)
+   assert(mt.b[1].bwtype=="AS")
+   
+   assert(media_descriptions:match(media2))
+
+   local mtt = Ct(Cg(Ct(media_description^1,"m"))):match(media2)
+   print(media_descriptions:match(media2),string.len(media2))
+--   assert(mtt.m)
+   print(mtt.a[1])
+--   assert(mtt.m[1].media.media=="video")
+   
 end
 
 sdp.bnf_test()
@@ -253,11 +257,9 @@ function sdp.parse(str)
    local phone_fields = Cg(Ct(phone_field ^1),"p")
    local conn_field = P"c=" * Cg(Ct(sdp.space(C(text))^1) * crlf,"c") 
    local band_width = P"b=" * Cg(Ct(sdp.space(C(bwtype)) * ":" * sdp.space(C(digits))) * crlf,"b")
-   local time_field = P"t=" * Cg(sdp.space(C(any)) * crlf,"t") --todo detail
+   local time_fields = P"t=" * Cg(sdp.space(C(safe)) * crlf,"t") --todo detail
    local key_field = P"k=" *Cg(sdp.space(C(text)) * crlf,"k") --todo detail
-   local media = C(alphanum^1)
-   local media_port = digits --todo fix add "/"
-   local proto = alphanum + P("/")
+
    local attr_field = P"a=" * C(attribute) * crlf
    local attr_fields = Cg(Ct(attr_field ^1),"a")
 --   local media_field = P"m=" * sdp.space(media) * sdp.space(C(media_port)) * sdp.space(C(text)) * sdp.space(C(text))
@@ -304,7 +306,6 @@ function sdp.test1()
       "a=fmtp:96 profile-level-id=15;mode=AAC-hbr;sizelength=13;indexlength=3;indexdeltalength=3;config=1588\r\n"..
       "a=mpeg4-esid:101\r\n"..
       "a=control:trackid=1\r\n"..
-      "m=aa bb\r\n"..
       "m=video 0 qq 97\r\n"..
       "b=AS:300\r\n"..
       "a=rtpmap:97 H264/90000\r\n"..
