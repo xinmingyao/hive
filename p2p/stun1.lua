@@ -48,8 +48,27 @@ local function decode_attr_err(data,sz,len,pos)
 end
 
 
-   
+local function encode_attr_addr(atype,data,ip,port)
+   local f = ">SSII"
+   local value = hivelib.string2ip(ip)
+   local len = 4 + 4 
+   data = data .. bin.pack(f,atype,len,value,port)
+   return data
+end   
 
+local function encode_attr_string(atype,str)
+   local f = ">SSA"..string.len(str)
+   local len = string.len(str)
+   data = data .. bin.pack(f,atype,len,str)
+   return data
+end
+
+local function encode_attr_int(atype,num)
+   local f = ">SSI"
+   local len = 4
+   data = data ..  bin.pack(f.atype,len,num)
+   return data
+end
 local encode_attr = {
    ['MAPPED-ADDRESS'] = function(...) return  encode_attr_addr(0x0001,...) end,
    ['RESPONSE-ADDRESS'] = function(...) return encode_attr_addr(0x0002,...) end,-- % Obsolete
@@ -73,31 +92,31 @@ local encode_attr = {
    ['REALM'] = function(...) return encode_attr_string(0x0014...) end,
    ['NONCE'] = function(...) return  encode_attr_string(0x0015,...) end,
    ['XOR-RELAYED-ADDRESS'] = function(...) return encode_attr_addr(0x0016,...) end,
-   [0x0017] = function(...) return 'REQUESTED-ADDRESS-TYPE', encode_attr_string(...) end,
-   [0x0018] = function(...) return 'EVEN-PORT', decode_attr_string(...) end,-- draft-ietf-behave-turn-10
-   [0x0019] = function(...) return 'REQUESTED-TRANSPORT', decode_attr_string(...) end ,--}; % draft-ietf-behave-turn-10
-   [0x001a] = function(...) return 'DONT-FRAGMENT', decode_attr_string(...) end, --}; % draft-ietf-behave-turn-10
-   [0x0020] = function(...) return 'XOR-MAPPED-ADDRESS'  decode_attr_addr(...) end ,--};
-   [0x0022] = function(...) return 'RESERVATION-TOKEN', decode_attr_string(...) end ,--}; % draft-ietf-behave-turn-10
-   [0x0024] = function(...) return 'PRIORITY', decode_attr_int(...) end ,--}; % draft-ietf-mmusic-ice-19
-   [0x0025] = function(...) return 'USE-CANDIDATE', decode_attr_int(...) end,--}; % draft-ietf-mmusic-ice-19
-   [0x0026] = function(...) return 'PADDING', decode_attr_string(...) end ,--}; % draft-ietf-behave-nat-behavior-discovery-03
-   [0x0027] = function(...) return 'RESPONSE-PORT', decode_attr_int(...) end ,--};
-   [0x0028] = function(...) return 'XOR-REFLECTED-FROM', decode_attr_addr(...) end, --}; % draft-ietf-behave-nat-behavior-discovery-03
-   [0x0030] = function(...) return 'ICMP', decode_attr_string(...) end , --}; % Moved from TURN to a future I-D
-   [0x8020] = function(...) return 'X-VOVIDA-XOR-MAPPED-ADDRESS', decode_attr_addr(...) end, --}; % VOVIDA non-standart
-   [0x8021] = function(...) return 'X-VOVIDA-XOR-ONLY', decode_attr_string(...) end,--}; % VOVIDA non-standart
-   [0x8022] = function(...) return 'SOFTWARE', decode_attr_string(...) end ,--}; % VOVIDA 'SERVER-NAME'
-   [0x8023] = function(...) return 'ALTERNATE-SERVER', decode_attr_addr(...) end,
-   [0x8027] = function(...) return 'CACHE_TIMEOUT', decode_attr_string(...) end, --}; % draft-ietf-behave-nat-behavior-discovery-03
-   [0x8028] = function(...) return 'FINGERPRINT', decode_attr_string(...) end,
-   [0x8029] = function(...) return 'ICE-CONTROLLED', decode_attr_int(...) end ,--}; % draft-ietf-mmusic-ice-19
-   [0x802a] = function(...) return 'ICE-CONTROLLING', decode_attr_int(...) end ,--}; % draft-ietf-mmusic-ice-19
-   [0x802b] = function(...) return 'RESPONSE-ORIGIN', decode_attr_addr(...) end,
-   [0x802c] = function(...) return 'OTHER-ADDRESS', decode_attr_addr(...) end,
-   [0x8050] = function(...) return 'X-VOVIDA-SECONDARY-ADDRESS', decode_attr_addr(...) end,--}; % VOVIDA non-standart
-   [0xc001] = function(...) return 'CONNECTION-REQUEST-BINDING', decode_attr_string(...) end,
-   [0xc002] = function(...) return 'BINDING-CHANGE', decode_attr_string(...) end
+   ['REQUESTED-ADDRESS-TYPE'] = function(...) return  encode_attr_string(0x0017,...) end,
+   ['EVEN-PORT'] = function(...) return  encode_attr_string(0x0018,...) end,-- draft-ietf-behave-turn-10
+   ['REQUESTED-TRANSPORT'] = function(...) return  encode_attr_string(0x0019,...) end ,--}; % draft-ietf-behave-turn-10
+   ['DONT-FRAGMENT'] = function(...) return encode_attr_string(0x001a,...) end, --}; % draft-ietf-behave-turn-10
+   ['XOR-MAPPED-ADDRESS'] = function(...) return   encode_attr_addr(0x0020,...) end ,--};
+   ['RESERVATION-TOKEN'] = function(...) return  encode_attr_string(0x0022,...) end ,--}; % draft-ietf-behave-turn-10
+   ['PRIORITY'] = function(...) return  encode_attr_int(0x0024,...) end ,--}; % draft-ietf-mmusic-ice-19
+   ['USE-CANDIDATE'] = function(...) return  encode_attr_int(0x0025,...) end,--}; % draft-ietf-mmusic-ice-19
+   ['PADDING'] = function(...) return encode_attr_string(0x0026,...) end ,--}; % draft-ietf-behave-nat-behavior-discovery-03
+   ['RESPONSE-PORT'] = function(...) return  encode_attr_int(0x0027,...) end ,--};
+   ['XOR-REFLECTED-FROM'] = function(...) return encode_attr_addr(0x0028,...) end, --}; % draft-ietf-behave-nat-behavior-discovery-03
+   ['ICMP'] = function(...) return encode_attr_string(0x0030,...) end , --}; % Moved from TURN to a future I-D
+   ['X-VOVIDA-XOR-MAPPED-ADDRESS'] = function(...) return encode_attr_addr(0x8020,...) end, --}; % VOVIDA non-standart
+   ['X-VOVIDA-XOR-ONLY'] = function(...) return  encode_attr_string(0x8021,...) end,--}; % VOVIDA non-standart
+   ['SOFTWARE'] = function(...) return encode_attr_string(0x8022,...) end ,--}; % VOVIDA 'SERVER-NAME'
+   ['ALTERNATE-SERVER'] = function(...) return encode_attr_addr(0x8023,...) end,
+   ['CACHE_TIMEOUT'] = function(...) return encode_attr_string(0x8027,...) end, --}; % draft-ietf-behave-nat-behavior-discovery-03
+   ['FINGERPRINT'] = function(...) return encode_attr_string(0x8028,...) end,
+   ['ICE-CONTROLLED'] = function(...) return encode_attr_int(0x8029,...) end ,--}; % draft-ietf-mmusic-ice-19
+   ['ICE-CONTROLLING'] = function(...) return encode_attr_int(0x802a,...) end ,--}; % draft-ietf-mmusic-ice-19
+   ['RESPONSE-ORIGIN'] = function(...) return  encode_attr_addr(0x802b,...) end,
+   ['OTHER-ADDRESS'] = function(...) return encode_attr_addr(0x802c,...) end,
+   ['X-VOVIDA-SECONDARY-ADDRESS'] = function(...) return encode_attr_addr(0x8050,...) end,--}; % VOVIDA non-standart
+   ['CONNECTION-REQUEST-BINDING'] = function(...) return encode_attr_string(0xc001,...) end,
+   ['BINDING-CHANGE'] = function(...) return encode_attr_string(0xc002,...) end
 }
 
 local decode_attr = {
