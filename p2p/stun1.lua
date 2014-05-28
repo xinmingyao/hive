@@ -1,6 +1,8 @@
 --local bin = require "cell.binlib"
+local crc32 = require('protocol.crc32')
 local p2p_lib = require "p2p.p2p_lib"
 local bit  = require "bit32"
+local crypto = require("crypto")
 local STUN_MARKER = 0
 local STUN_MAGIC_COOKIE = 0x2112A442
 local stun = {}
@@ -8,19 +10,16 @@ local stun = {}
 local stun_meta ={}
 function stun.new()
    local s = {class = nil,
-		method = nil,
-		transactionid = nil,
-		integrity = false,
-		key = nil,
-		fingerprint = true,
-		attrs = {}
+	      method = nil,
+	      tx_id = nil,
+	      integrity = false,
+	      key = nil,
+	      fingerprint = true,
+	      attrs = {}
    }
    return setmetatable(s,{__index = stun_meta})
 end 
 
-local function check_fingerprint(data)
-   
-end
 
 local function  decode_attr_addr(data,sz,len,pos)
    local v = {}
@@ -48,26 +47,32 @@ local function decode_attr_err(data,sz,len,pos)
 end
 
 
-local function encode_attr_addr(atype,data,ip,port)
+local function encode_attr_addr(atype,addr)
+   assert(type(addr)=="table")
+   local ip,port
+   ip = addr.ip
+   port = addr.port
+   assert(type(ip)=="string")
+   assert(type(port)=="number")
    local f = ">SSII"
-   local value = hivelib.string2ip(ip)
+   local value = p2p_lib.string2ip(ip)
    local len = 4 + 4 
-   data = data .. bin.pack(f,atype,len,value,port)
-   return data
+   return  bin.pack(f,atype,len,value,port)
+
 end   
 
 local function encode_attr_string(atype,str)
+   assert(type(str)=="string")
    local f = ">SSA"..string.len(str)
    local len = string.len(str)
-   data = data .. bin.pack(f,atype,len,str)
-   return data
+   return bin.pack(f,atype,len,str)
 end
 
 local function encode_attr_int(atype,num)
+   assert(type(num)=="number")
    local f = ">SSI"
    local len = 4
-   data = data ..  bin.pack(f.atype,len,num)
-   return data
+   return bin.pack(f.atype,len,num)
 end
 local encode_attr = {
    ['MAPPED-ADDRESS'] = function(...) return  encode_attr_addr(0x0001,...) end,
@@ -89,7 +94,7 @@ local encode_attr = {
    ['DESTINATION-ADDRESS'] = function(...) return  encode_attr_addr(0x0011,...) end,
    ['XOR-PEER-ADDRESS'] = function(...) return encode_attr_xaddr(0x0012,...) end,
    ['DATA'] = function(...) return  encode_attr_string(0x0013,...) end,
-   ['REALM'] = function(...) return encode_attr_string(0x0014...) end,
+   ['REALM'] = function(...) return encode_attr_string(0x0014,...) end,
    ['NONCE'] = function(...) return  encode_attr_string(0x0015,...) end,
    ['XOR-RELAYED-ADDRESS'] = function(...) return encode_attr_addr(0x0016,...) end,
    ['REQUESTED-ADDRESS-TYPE'] = function(...) return  encode_attr_string(0x0017,...) end,
@@ -109,7 +114,7 @@ local encode_attr = {
    ['SOFTWARE'] = function(...) return encode_attr_string(0x8022,...) end ,--}; % VOVIDA 'SERVER-NAME'
    ['ALTERNATE-SERVER'] = function(...) return encode_attr_addr(0x8023,...) end,
    ['CACHE_TIMEOUT'] = function(...) return encode_attr_string(0x8027,...) end, --}; % draft-ietf-behave-nat-behavior-discovery-03
-   ['FINGERPRINT'] = function(...) return encode_attr_string(0x8028,...) end,
+--   ['FINGERPRINT'] = function(...) return encode_attr_string(0x8028,...) end,
    ['ICE-CONTROLLED'] = function(...) return encode_attr_int(0x8029,...) end ,--}; % draft-ietf-mmusic-ice-19
    ['ICE-CONTROLLING'] = function(...) return encode_attr_int(0x802a,...) end ,--}; % draft-ietf-mmusic-ice-19
    ['RESPONSE-ORIGIN'] = function(...) return  encode_attr_addr(0x802b,...) end,
@@ -146,7 +151,7 @@ local decode_attr = {
    [0x0018] = function(...) return 'EVEN-PORT', decode_attr_string(...) end,-- draft-ietf-behave-turn-10
    [0x0019] = function(...) return 'REQUESTED-TRANSPORT', decode_attr_string(...) end ,--}; % draft-ietf-behave-turn-10
    [0x001a] = function(...) return 'DONT-FRAGMENT', decode_attr_string(...) end, --}; % draft-ietf-behave-turn-10
-   [0x0020] = function(...) return 'XOR-MAPPED-ADDRESS'  decode_attr_addr(...) end ,--};
+   [0x0020] = function(...) return 'XOR-MAPPED-ADDRESS' , decode_attr_addr(...) end ,--};
    [0x0022] = function(...) return 'RESERVATION-TOKEN', decode_attr_string(...) end ,--}; % draft-ietf-behave-turn-10
    [0x0024] = function(...) return 'PRIORITY', decode_attr_int(...) end ,--}; % draft-ietf-mmusic-ice-19
    [0x0025] = function(...) return 'USE-CANDIDATE', decode_attr_int(...) end,--}; % draft-ietf-mmusic-ice-19
@@ -159,7 +164,7 @@ local decode_attr = {
    [0x8022] = function(...) return 'SOFTWARE', decode_attr_string(...) end ,--}; % VOVIDA 'SERVER-NAME'
    [0x8023] = function(...) return 'ALTERNATE-SERVER', decode_attr_addr(...) end,
    [0x8027] = function(...) return 'CACHE_TIMEOUT', decode_attr_string(...) end, --}; % draft-ietf-behave-nat-behavior-discovery-03
-   [0x8028] = function(...) return 'FINGERPRINT', decode_attr_string(...) end,
+--   [0x8028] = function(...) return 'FINGERPRINT', decode_attr_string(...) end,
    [0x8029] = function(...) return 'ICE-CONTROLLED', decode_attr_int(...) end ,--}; % draft-ietf-mmusic-ice-19
    [0x802a] = function(...) return 'ICE-CONTROLLING', decode_attr_int(...) end ,--}; % draft-ietf-mmusic-ice-19
    [0x802b] = function(...) return 'RESPONSE-ORIGIN', decode_attr_addr(...) end,
@@ -169,9 +174,84 @@ local decode_attr = {
    [0xc002] = function(...) return 'BINDING-CHANGE', decode_attr_string(...) end
 }
 
-function stun.decode(bin,sz)
+function stun.encode(req)
+   assert(req and type(req)=="table")
+   assert(type(req.tx_id) == "number")
+   local attrs = req.attrs
+   local k,v,data
+   data = ""
+   for k,v in attrs do
+      if encode_attr[k] then
+	 data = data .. encode_attr[k](v)
+      end
+   end
+   local bin
+   local s_type = get_type(req)
+   local len = string.len(data)
+   local f = ">IILA" 
+   -- txid must long ,and 4 byte 0 + txid = 96 bit transactionid
+   data = bin.pack(f,STUN_MAGIC_COOKIE,0,req.tx_id,data)
+   if req.fingerprint then
+      len = len + 8 
+      f = ">SSA"..msg_len
+      local size = string.len(bin) + 8 -20
+      local pos,s_type,msg = bin.unpack(f,bin)
+      local msg = bin.pack(">SSA",s_type,size,msg)
+      local crc = bit32.bxor(crc32.hash(msg),0x5354554e)
+      bin = bin.pack(">SSACCCCA",s_type,size,msg,0x80,0x28,0x0,ox4,crc)
+   end
+   if req.integrity and req.key then
+      local msg_len = string.len(bin)-4 
+      f = ">SSA"..msg_len
+      local pos,s_type,t,msg = bin.unpack(f,bin)
+      local size = string.len(bin) + 24 - 20
+      local bin2 = bin.pack(">SSA",s_type,size,msg)
+      local finger = crypto:sha_mac(req.key,bin2)
+      bin = bin.pack(">SSACCCCA",s_type,len,msg,0x0,0x8,0x0,0x14,finger)
+   end
+   return bin
+end
+function stun.decode(bin,sz,key)
    local rep = stun.new()
-   local  pos,s_type,length,magic_cookie,tx_id = bin.unpack(">SSIA12",data,sz)
+   local size = sz - 8
+   local f = "A" .. size.."CCCCA32"
+   local data = bin.unpack(">A"..sz,bin,sz)
+   local pos,msg,c1,c2,c3,c4,rest,crc = bin.unpack(f,data)
+   --check finger print
+   if c1 == 0x080 and c1 == 0x28 and c3 == 0x0 and c4 == 0x04 then
+      local crc1 = bit32.bxor(crc32.hash(msg),0x5354554e)
+      if crc1 ~= crc then
+	 return false
+      end
+      f = ">SSA"..string.len(msg) -4 
+      pos,s_type,len,data = bin.unpack(f,bin,sz)
+      req.fingerprint = true
+   else
+      req.fingerprint = false
+      print("no crc was found in stun message")
+   end
+   
+   --check integrity
+   if key then
+      size = string.len(data) - 24
+      f = ">A"..size.."CCCC".."A20"
+      pos,msg,c1,c2,c3,c4,finger  = bin.unpack(f,data)
+      if c1 == 0x000 and c1 == 0x08 and c3 == 0x00 and c4 == 0x14 and finger then
+	 local finger2 = crypto:sha_mac(key,msg)
+	 if finger == finger2 then
+	    local old,payload
+	    pos,s_type,old,payload = bin.unpack(">SSA"..(string.len(msg)-4),msg)
+	    data = bin.pack(">SSA",s_type,old-24,payload)
+	    req.integrity = true
+	 else
+	    return false
+	 end
+      else
+	 req.integrity = false
+      end
+
+   end
+   local  pos,s_type,length,magic_cookie,tx_id = bin.unpack(">SSIA12",data)
    --libnice stunmessage 
    local s_type1 = s_type
    local b1 =  bit.brshift(2,bit.band(s_type1,0x3e00))  
@@ -194,7 +274,7 @@ function stun.decode(bin,sz)
       [0x005] = "connect",
       [0x006] = "send",
       [0x007] = "data",
-      [0x008] = "createpermission"
+      [0x008] = "createpermission",
       [0x009] = "channelbind"
    }
    rep.method =  method2str[method]
@@ -209,7 +289,7 @@ function stun.decode(bin,sz)
       local t,len,tt
       pos, t,len= bin.unpack(">SS", data,sz,pos)      
       local f = decode_attr[t]
-      if f != nil then
+      if f ~= nil then
 	 pos,key,value = f(data,len,pos)
 	 rep[key] = value
       else

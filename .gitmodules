@@ -1,0 +1,9 @@
+[submodule "deps/luasec"]
+	path = deps/luasec
+	url = https://github.com/xinmingyao/luasec.git
+[submodule "deps/lpeg"]
+	path = deps/lpeg
+	url = https://github.com/LuaDist/lpeg
+[submodule "deps/luacrypto"]
+	path = deps/luacrypto
+	url = https://github.com/luvit/luacrypto
