@@ -332,8 +332,8 @@ function socket:dtls_open(cfg)
    end
 end
 
-function socket:dtls_listen(cfg)
-   print(cfg)
+function socket:dtls_listen(cfg,ip,port)
+   cell.connect_udp(fd,ip,port)
    return socket.dtls_open(self,cfg)
 end
 
@@ -343,7 +343,6 @@ function socket:connect_udp(...)
 end
 function socket:dtls_connect(cfg,ip,port)
    local fd = self.__fd
-   print("---",type(fd),ip,port)
    cell.connect_udp(fd,ip,port)
    if socket.dtls_open(self,cfg) then
       local r,msg =  do_handshake(fd)

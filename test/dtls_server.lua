@@ -1,4 +1,5 @@
 local cell = require "cell"
+local peer_port
 cell.command {
 	ping = function()
 		cell.sleep(1)
@@ -7,6 +8,10 @@ cell.command {
 	sleep = function(T)
 	      cell.sleep(T)
 	      return true
+	end,
+	set_peer = function(...)
+	   peer_ip,peer_port = ...
+	   return true
 	end
 }
 function cell.main()

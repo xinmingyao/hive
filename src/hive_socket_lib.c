@@ -40,8 +40,9 @@ struct socket {
 	struct write_buffer * head;
 	struct write_buffer * tail;
 	int stype; //socket type
-  int ssl_type;
-  int ssl_state;
+  short ssl_type;
+  short ssl_state;
+  short udp_listen;
 };
 
 struct socket_pool {
@@ -150,6 +151,7 @@ new_socket(struct socket_pool *p, int sock,int stype) {
 			s->stype = stype;
 			s->ssl_type = 0;
 			s->ssl_state = 0;
+			s->udp_listen = 0;
 			p->count++;
 			p->id = id + 1;
 			if (p->id > MAX_ID) {
@@ -312,11 +314,13 @@ static lioctl(lua_State *L){
     return luaL_error(L, "Close invalid socket %d", id);
   }
   int type = luaL_checkinteger(L,2);
-  int state = luaL_checkinteger(L,3);
   if (type == 1){
-    printf ("----%d %d\n",type,state);
+    int state = luaL_checkinteger(L,3);
+    int udp_listen =luaL_checkinteger(L,4);
     s->ssl_type = SSL_DTLS;
     s->ssl_state = state;
+    s->udp_listen = udp_listen;
+    printf ("ioctl:%d %d\n",type,state);
   }else{
     return luaL_error(L,"not support type %d",type);
   }
@@ -543,6 +547,15 @@ lpoll(lua_State *L) {
 				t += accept_result(L, t, e->s, p);
 			} else {
 			  if(s->ssl_type >=1 && s->ssl_state == LHIVE_STATE_NEW) {// 4 ssl handshake
+			    /*
+			    if(s->udp_listen == 1){ //connect to peer,for openssl handshake
+			      struct sockaddr_in addr;
+			      memset(&addr, 0, sizeof(struct sockaddr_in));
+			      int addr_len = sizeof(struct sockaddr_in);
+			      char buffer[READ_BUFFER];
+			      recvfrom(s->fd,buffer,READ_BUFFER,MSG_PEEK,(struct sockaddr *)&addr ,&addr_len);
+			      connect(s->fd,(struct sockaddr *)&addr,sizeof(addr_len));
+			      }*/
 			    t+= push_ssl_event(L,t,e->s,p,EVENT_READ);
 			  }else{
 			    t += push_result(L, t, e->s, p);

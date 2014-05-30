@@ -8,20 +8,25 @@ local STUN_MAGIC_COOKIE = 0x2112A442
 local stun = {}
 
 local stun_meta ={}
-function stun.new()
-   local s = {class = nil,
-	      method = nil,
-	      tx_id = nil,
+function stun.new(c,m,t,a)
+   if a == nil then
+      a = {}
+   end
+   assert(type(a)=="table")
+   local s = {class = c,
+	      method = m,
+	      tx_id = t,
 	      integrity = false,
 	      key = nil,
 	      fingerprint = true,
-	      attrs = {}
+	      attrs = a
    }
    return setmetatable(s,{__index = stun_meta})
 end 
 
 
-local function  decode_attr_addr(data,sz,len,pos)
+local function  decode_attr_addr(data,len)
+   assert(len==8)
    local v = {}
    local pos1
    pos1,v.type,v.family,v.port,v.ip = bin.unpack(">CCSI",data,sz,pos)
@@ -29,19 +34,24 @@ local function  decode_attr_addr(data,sz,len,pos)
    return pos1,v
 end
 
-local function decode_attr_int(data,sz,len,pos)
-   return bin.unpack(">S",data,sz,pos)
+local function decode_attr_int(data,len)
+   assert(len==4 or len == 8)
+   if len == 4 then
+      return bin.unpack(">S",data)
+   else
+      return bin.unpack(">L",data)
+   end
 end
 
-local function decode_attr_string(data,sz,len,pos)
-   return bin.unpack(">A"..len,data,sz,pos)
+local function decode_attr_string(data,len)
+   return bin.unpack(">A"..len,data)
 end
 
-local function decode_attr_err(data,sz,len,pos)
+local function decode_attr_err(data,len)
    local v = {}
    local pos1 
    local t = len - 4
-   pos1,v.reserve,v.class,v.number,v.reason = bin.unpack(">SCCA"..t,data,sz,pos)
+   pos1,v.reserve,v.class,v.number,v.reason = bin.unpack(">SCCA"..t,data)
    v.class = bin.xor(v.class,oxF) -- only 4 bit for class
    return pos1,v 
 end
@@ -54,17 +64,16 @@ local function encode_attr_addr(atype,addr)
    port = addr.port
    assert(type(ip)=="string")
    assert(type(port)=="number")
-   local f = ">SSII"
-   local value = p2p_lib.string2ip(ip)
+   local ip_int = p2p_lib.string2ip(ip)
    local len = 4 + 4 
-   return  bin.pack(f,atype,len,value,port)
+   return  bin.pack(">SSII",atype,len,ip_int,port)
 
 end   
 
 local function encode_attr_string(atype,str)
    assert(type(str)=="string")
-   local f = ">SSA"..string.len(str)
    local len = string.len(str)
+   local f = ">SSA"
    return bin.pack(f,atype,len,str)
 end
 
@@ -74,6 +83,14 @@ local function encode_attr_int(atype,num)
    local len = 4
    return bin.pack(f.atype,len,num)
 end
+
+local function encode_attr_long(atype,num)
+   assert(type(num)=="number")
+   local f = ">SSL"
+   local len = 8
+   return bin.pack(f.atype,len,num)
+end
+
 local encode_attr = {
    ['MAPPED-ADDRESS'] = function(...) return  encode_attr_addr(0x0001,...) end,
    ['RESPONSE-ADDRESS'] = function(...) return encode_attr_addr(0x0002,...) end,-- % Obsolete
@@ -174,7 +191,8 @@ local decode_attr = {
    [0xc002] = function(...) return 'BINDING-CHANGE', decode_attr_string(...) end
 }
 
-function stun.encode(req)
+function stun_meta:encode()
+   local req = self
    assert(req and type(req)=="table")
    assert(type(req.tx_id) == "number")
    local attrs = req.attrs
@@ -186,84 +204,98 @@ function stun.encode(req)
       end
    end
    local bin
-   local s_type = get_type(req)
+   assert(req.class and req.method)
+   local c,m = req.class,req.method
+   
+
+   -- h[0] = (c>>1) | ((m>>6)&0x3e)
+   -- h[1] = ((c<<4) & 0x10) | ((m<<1)&0xe0) | (m&0x0f)
+   local s1 = bit.band(bit.bor(bit.rshift(c,1),bit.rshift(m,6)),0x3e)
+   local s2 = bit.bor(
+      bit.band(bit.lshift(c,4),0x10),
+      bit.band(bit.lshift(m,1),0xe0),
+      bit.band(m,0x0f))
+   local s_type = bit.bor(bit.lshift(s1,8),s2)
    local len = string.len(data)
    local f = ">IILA" 
    -- txid must long ,and 4 byte 0 + txid = 96 bit transactionid
    data = bin.pack(f,STUN_MAGIC_COOKIE,0,req.tx_id,data)
+  
+   if req.integrity and req.key then
+      len = len + 24 
+      data = bin.pack(">SSA",s_type,len,data)
+      local finger = crypto:sha_mac(req.key,data)
+      data = bin.pack(">SSACCCCA",s_type,len,data,0x0,0x8,0x0,0x14,finger)
+   end
+
    if req.fingerprint then
       len = len + 8 
-      f = ">SSA"..msg_len
-      local size = string.len(bin) + 8 -20
-      local pos,s_type,msg = bin.unpack(f,bin)
-      local msg = bin.pack(">SSA",s_type,size,msg)
-      local crc = bit32.bxor(crc32.hash(msg),0x5354554e)
-      bin = bin.pack(">SSACCCCA",s_type,size,msg,0x80,0x28,0x0,ox4,crc)
+      data = bin.pack(">SSA",s_type,len,data)
+      local crc = bit32.bxor(crc32.hash(data),0x5354554e)      
+      data = bin.pack(">ACCCCI",s_type,len,data,0x80,0x28,0x0,ox4,crc)
    end
-   if req.integrity and req.key then
-      local msg_len = string.len(bin)-4 
-      f = ">SSA"..msg_len
-      local pos,s_type,t,msg = bin.unpack(f,bin)
-      local size = string.len(bin) + 24 - 20
-      local bin2 = bin.pack(">SSA",s_type,size,msg)
-      local finger = crypto:sha_mac(req.key,bin2)
-      bin = bin.pack(">SSACCCCA",s_type,len,msg,0x0,0x8,0x0,0x14,finger)
-   end
-   return bin
+   
+   return data
 end
-function stun.decode(bin,sz,key)
+function stun.decode(data,sz,key)
    local rep = stun.new()
-   local size = sz - 8
-   local f = "A" .. size.."CCCCA32"
-   local data = bin.unpack(">A"..sz,bin,sz)
-   local pos,msg,c1,c2,c3,c4,rest,crc = bin.unpack(f,data)
+   local len  = sz - 8 - 4
+   local f = ">SSA" .. size..">CCCCI"
+   local pos,s_type,len,data,c1,c2,c3,c4,crc= bin.unpack(">A"..sz,bin,sz)
    --check finger print
-   if c1 == 0x080 and c1 == 0x28 and c3 == 0x0 and c4 == 0x04 then
-      local crc1 = bit32.bxor(crc32.hash(msg),0x5354554e)
-      if crc1 ~= crc then
-	 return false
+   if sz > 20 + 8 then
+      if c1 == 0x080 and c1 == 0x28 and c3 == 0x0 and c4 == 0x04 then
+	 local crc1 = bit32.bxor(crc32.hash(msg),0x5354554e)
+	 if crc1 ~= crc then
+	    return false
+	 end
+	 len = len -8
+	 req.fingerprint = true
+      else
+	 data = bin.pack(">ACCCCI",data,c1,c2,c3,c4,crc)
+	 req.fingerprint = false
+	 print("no crc was found in stun message")
       end
-      f = ">SSA"..string.len(msg) -4 
-      pos,s_type,len,data = bin.unpack(f,bin,sz)
-      req.fingerprint = true
    else
       req.fingerprint = false
       print("no crc was found in stun message")
-   end
-   
+   end   
    --check integrity
    if key then
-      size = string.len(data) - 24
-      f = ">A"..size.."CCCC".."A20"
-      pos,msg,c1,c2,c3,c4,finger  = bin.unpack(f,data)
+      if len < 20 + 24 then
+	 return false
+      end
+      len = len -24
+      f = ">A"..len.."CCCC".."A20"
+      pos,data,c1,c2,c3,c4,finger  = bin.unpack(f,data)
       if c1 == 0x000 and c1 == 0x08 and c3 == 0x00 and c4 == 0x14 and finger then
-	 local finger2 = crypto:sha_mac(key,msg)
+	 local finger2 = crypto:sha_mac(key,data)
 	 if finger == finger2 then
-	    local old,payload
-	    pos,s_type,old,payload = bin.unpack(">SSA"..(string.len(msg)-4),msg)
-	    data = bin.pack(">SSA",s_type,old-24,payload)
 	    req.integrity = true
 	 else
 	    return false
 	 end
       else
-	 req.integrity = false
+	 return false
       end
 
    end
-   local  pos,s_type,length,magic_cookie,tx_id = bin.unpack(">SSIA12",data)
-   --libnice stunmessage 
-   local s_type1 = s_type
-   local b1 =  bit.brshift(2,bit.band(s_type1,0x3e00))  
-   local b2 =  bit.brshift(1,bit.band(s_type1,0x00e0))  
-   local b3 = bit.band(s_type,0x000f)
-   local method = bit.bor(b1,b2,b3)
+   local pos,magic_cookie,tmp,tx_id,data = bin.unpack(">IILA"..(len-16),data)
    --hack google/msn data
    if s_type == 0x0115 then
       s_type =0x0017
    end
-   local b4 = bit.brshift(7,bit.band(s_type,0x0100))
-   local b5 = bit.brshift(4,bit.band(s_type,0x0010))
+   
+   --libnice stunmessage
+   --(((t&0x3e00)>>2) | ((t&0x00e0)>>1) | (t&0x000f))
+   local s_type1 = s_type
+   local b1 =  bit.brshift(bit.band(s_type1,0x3e00),2)  
+   local b2 =  bit.brshift(bit.band(s_type1,0x00e0),1)  
+   local b3 = bit.band(s_type,0x000f)
+   local method = bit.bor(b1,b2,b3)
+   --(((t&0x0100)>>7)|((t&0x0010)>>4))
+   local b4 = bit.brshift(bit.band(s_type,0x0100),7)
+   local b5 = bit.brshift(bit.band(s_type,0x0010),4)
    local class = bit.bor(b4,b5)
    
    local method2str = {
@@ -285,18 +317,20 @@ function stun.decode(bin,sz,key)
       [3] = "error"
    }
    rep.class = class2str[class]
-   while( pos < sz ) do
+   rep.tx_id = tx_id
+   while string.len(data) do
       local t,len,tt
-      pos, t,len= bin.unpack(">SS", data,sz,pos)      
+      pos, t,len= bin.unpack(">SS", data)      
       local f = decode_attr[t]
       if f ~= nil then
-	 pos,key,value = f(data,len,pos)
-	 rep[key] = value
+	 pos,key,value = f(data,len)
+	 rep.attrs[key] = value
       else
-	 pos,tt = bin.unpack(">A"..len,data,sz,pos)
-	 rep[t] = tt
+	 pos,tt = bin.unpack(">A"..len)
+	 rep.attrs[t] = tt
 	 print("warning unknow type:",t)
       end
+      data = string.sub(data,pos)
    end
       return rep
 end

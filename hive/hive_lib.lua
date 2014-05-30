@@ -89,6 +89,7 @@ hive_lib.strsplit = function (pattern, text)
       break;
     end
   end
+
   return list;
 end
 
