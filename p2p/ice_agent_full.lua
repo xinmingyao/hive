@@ -20,7 +20,8 @@ local pair_id = 1
 local ta = 20 -- timeout for gather and check
 local max_count = 3
 local que_meta = {}
-
+local ssl = require "ssl"
+local lua_srtp = require "lua_srtp"
 local function new_que()
    local q = {count=0,data={}}
    return setmetatable(q,{__index=que_meta})
@@ -29,6 +30,17 @@ end
 function que_meta:append(v)
    table.insert(self.data,v)
 end
+
+function que_meta:append_if_not_exist(v)
+   local i 
+   for i=self.count,#self do
+      if v.id == self[i].id then
+	 return
+      end
+   end
+   table.insert(self.data,v)
+end
+
 function que_meta:is_que_empty()
    return self.count > #(self.data)
 end
@@ -41,13 +53,6 @@ local function is_gather_que_empyt()
    return gather_que.count > #(gather_que)
 end
 
-local trigger_que = new_que()
-local gather_que = new_que()
-local function pop_gather_que()
-   local count  = gather_que.count
-   gather_que.count = count + 1
-   return gather_que[count]
-end
 local function deep_copy(src,dst)
    local k,v
    for k,v in dst do
@@ -139,73 +144,360 @@ local function do_gather_complete()
 end
 
 local function is_gather_complete()
-   if #gather_tx == 0 and is_gather_que_empyt() then
-      state = "running"
-      do_gather_complete()
-      cell.resume(start_ev)
+   if #gather_tx ~= 0 then
+      return 
    end
+   local i
+   for i=1,#local_streams do
+      local que = local_streams[i].gather_que
+      if not que:is_que_empty() then
+	 return
+      end
+   end
+   state = "running"
+   do_gather_complete()
+   cell.resume(start_ev)
 end
-local function do_gather(cmd,...)
-      local fsm = {
-	 gather =function()	    
-	    if is_gather_que_empyt() then
-	       return
-	    end
-	    local gather = pop_gather_que()
-	    gather_tx[tx_id] = {count=1,gather = gather}
-	    tx_id = tx_id +1
-	    local req = stun.new("request","binding",tx_id)
-	    local data = req:encode()
-	    local s = gather.c.socket
-	    s:write(data,gather.stun_ip,gather.stun_port)
-	    cell.timeout(ta,function()
-			    cell.send(cell.self,"gather_rto",tx_id)
-	    end)
-	 end,
-	 gather_rto = function(tid)
-	    if gather_tx[tid] then
-	       local count = gather_tx[tid].count
-	       if count > max_count then
-		  gather_tx[tid] = nil
-		  is_gather_complete()
-		  return 
-	       end
-	       count = count + 1
-	       gather_tx[tid].count = count
-	       local gather = gather_tx[tid].gather
-	       local req = stun.new("request","binding",tid)
-	       local data = req:encode()
-	       local s = gather.c.socket
-	       s:write(data,gather.stun_ip,gather.stun_port)
-	       cell.timeout(ta,function()
-			       cell.send(cell.self,"gather","gather_rto",tid)
-	       end)
-	    end
-	 end,
-	 stun = function(req)
-	    if gather_tx[req.tx_id] then
-	       local gather = gather_tx[req.tx_id].gather
-	       local host = gather.c
-	       local addr  = req.attrs['XOR-MAPPED-ADDRESS']
-	       local ip,port = addr.ip,addr.port
-	       local c = {type="CANDIDATE_TYPE_SERVER_REFLEXIVE",
-			  transport = "udp",
-			  addr = {ip=ip,port=port},
-			  base_addr = {ip = host.addr.ip,port= host.addr.port},
-			  cid = host.cid,
-			  sid = host.sid,
-			  user = host.user,
-			  pwd = host.pwd}	       
-	       table.insert(local_streams[sid].locals,c)
-	       is_gather_complete()
-	    end
-	 end
-      }
-      fsm[cmd](...)   
+
+local function do_gather(req)
+   if gather_tx[req.tx_id] then
+      local gather = gather_tx[req.tx_id].gather
+      local host = gather.c
+      local addr  = req.attrs['XOR-MAPPED-ADDRESS']
+      local ip,port = addr.ip,addr.port
+      local c = {type="CANDIDATE_TYPE_SERVER_REFLEXIVE",
+		 transport = "udp",
+		 addr = {ip=ip,port=port},
+		 base_addr = {ip = host.addr.ip,port= host.addr.port},
+		 cid = host.cid,
+		 sid = host.sid,
+		 user = host.user,
+		 pwd = host.pwd}	       
+      table.insert(local_streams[sid].locals,c)
+      gather_tx[req.tx_id] = nil
+      is_gather_complete()
+   end
 end 
 
-local function do_running()
+
+
+local function nominate_rto_timer(time,txid)
+   local tx = check_tx[txid]
+   if not tx then
+      return 
+   end
+   local index = tx.index
+   local pair = local_streams[tx.sid].validlist[index]
+   if count > 3 then
+      --should not happen 
+      assert(false,"nominate error!")
+   else      
+      do_send_check(pair,txid)
+      tx.count = count +1
+      cell.timeout(time,function()
+		      nominate_rto_timer(time,txid)
+      end)
+   end
 end
+
+local function regula_nominate_timer(time,sid)
+   local que = local_streams[sid].nominate_que
+   if que:is_que_empty() then
+      return
+   else
+      local index = que:pop()
+      local pair = local_streams[sid].validlist[index]
+      local tid = tx_id + 1
+      tx_id = tx_id + 1
+      check_tx[tid] = {sid=sid,index= index,count=1}
+      do_send_check(pair,tid)
+      cell.timer(ta,function()
+		    nominate_rto_timer(ta,tid)
+      end)
+   end
+end
+
+local function start_regula_nominate(sid)
+   if local_streams[sid].checklist_state == "CHECKLIST_COMPLETED" then
+      if local_streams[sid].regula_nominate then
+	 return 
+      end
+
+      local_streams[sid].regula_nominate = true
+
+      local que = new_que()
+      local_streams[sid].nominate_que  = que
+      local validlist = local_streams[sid].validlist
+      local i
+      for i = 1,#validlist do
+	 que:append(i)
+      end
+      cell.timer(ta,function()
+		    regula_nominate_timer(ta,sid)
+      end)
+   end
+end
+
+local function is_agent_succeed()
+   local i
+   local failed = true
+   for i =1 ,#local_streams do
+      if local_streams[i].checklist_state == "CHECKLIST_FAILED" then
+	 failed = failed and true
+      else
+	 failed = failed and false
+      end
+   end
+   if failed then
+      state = "failed"
+      return
+   end
+   
+   for i = 1 ,#local_streams do
+      if local_streams[i].checklist_state == "CHECKLIST_RUNNING" then
+	 return 
+      end
+   end
+
+   for i = 1,#local_streams do
+      if local_streams[i].checklist_state == "CHECKLIST_COMPLETED" then
+	 local validlist = local_streams[i].validlist
+	 local j
+	 for j=1 ,#validlist do
+	    if not validlist[j].is_nominate then
+	       return 
+	    end
+	 end
+      end
+   end
+   if opts.dtls then
+      
+      local i
+      for i =1 ,#local_streams do
+	 local validlist = local_streams[i]
+	 local j
+	 for j=1,#validlist do
+	    local pair = validlist[j]
+	    local socket = pair.l.c.socket
+	    local r,msg
+	    local cfg = opts.dtls_config
+	    assert(cfg)
+	    if role == "controlling" then
+	       r,msg = socket:dtls_listen(cfg,pair.r.addr.ip,pair.r.addr.port)
+	    else
+	       r,msg  = socket:dtls_connect(cfg,pair.r.addr.ip,pair.r.addr.port)
+	    end
+	    if r then
+	       local srtp = lua_srtp.new()
+	       local send_key,receiving_key =  ssl.dtls_session_keys(r)
+	       lua_srtp.set_rtp(srtp,send_key,receiving_key)
+	       pair.srtp = srtp
+	       pair.ssl = r
+	    else
+	       print("error:",msg)
+	    end
+	 end
+      end
+   end
+   state = "completed"
+   return
+end
+
+
+local function do_running(req,fd,peer_ip,peer_port)
+   if req.class =="error" then
+      local tid = req.tx_id
+      local tx = check_tx[tid]
+      if not tx then 
+	 return 
+      end
+      check_tx[tid] = nil
+      local err_code = req:get_addr_value('ERROR-CODE')
+      assert(err_code.number == 487) --todo other error
+      if role == "controlling" then
+	 role = "controlled"
+      else
+	 role = "controlling"
+      end
+      -- new role,recompute priority
+      priority_checklist()
+      sort_checklist()
+      check_tx[tid] = nil
+      local pair = get_pair_by_id(tx.sid,tx.pair_id)
+      pair.state = "PAIR_WAITING"
+      trigger_que:append({sid=tx.sid,pair_id=tx.pair_id})
+      return 
+   elseif req.class =="success" then
+      local tid = req.tx_id
+      local tx = check_tx[tid]
+      if not tx then
+	 return
+      end
+      if role == "controlling" and tx.is_nominate then
+	 local validlist = local_streams[tx.sid].validlist
+	 local i
+	 for i = 1,#validlist do
+	    if tx.pair_id == validlist[i].pair_id then
+	       validlist[i].is_nominate = true
+	       break
+	    end
+	 end
+      else
+	 local pair = get_pair_by_id(tx.sid,tx.pair_id)
+	 local validpair = {}
+	 --rfc 7.1.3.2
+	 local addr = req:get_addr_value('XOR-PEER-ADDRESS')
+	 if addr.ip == pair.r.addr.ip and addr.port == pair.r.addr.port then
+	    deep_copy(validpair,pair)
+	 else -- peer flex
+	    local priority = req:get_addr_value('PRIORITY')
+	    c1 = {fid=pair.l.fid,
+		  priority = priority,
+		  type = "CANDIDATE_TYPE_PEER_REFLEXIVE",
+		  transport = "udp",
+		  addr= {ip=addr.ip,port=addr.port},
+		  base_addr = {ip=pair.l.base_addr.ip,port = pair.l.base_addr.port},
+		  socket = pair.l.socket,
+		  cid = pair.l.cid,
+		  sid = pair.l.sid,
+		  user = pair.l.user,
+		  pwd = pair.l.pwd
+	    }
+	    table.insert(local_streams[tx.sid].locals,c1)
+	    --local remote = {}
+	    --deep_copy(remote,pair.r)
+	    deep_copy(validpair,pair)--{id = pair_id,l=c1,r=remote,cid=pair.cid,sid=pair.sid}
+	    validpair.l = c1 
+	    validpair.id = pair_id
+	    pair_id = pair_id +1 
+	    validpair.priority = compute_pair_priority(validpair)
+	 end
+      end
+      pair.state = "PAIR_COMPLETED"
+      update_checklist_state(tx.sid)
+      table.insert(local_streams[tx.sid].validlist,validpair)
+      if role == "controlling" then
+	 start_regula_nominate()
+      end
+      is_agent_succeed()
+   elseif req.class == "request" and req.method == "binding" then
+      local conflict = false
+      local role_change = false
+      local use_candidate = req:get_addr_value('USE-CANDIDATE')
+      if role == "controlling" then
+	 if req:get_addr_value('CONTROLLING') then
+	    if 	tie_break >  req:get_addr_value('CONTROLLING') then
+	       conflict = true
+	    else
+	       role_change = true
+	       role = "controlled"
+	    end
+	 end
+      else
+	 if req:get_addr_value('CONTROLLED') then
+	    if tie_break > req:get_addr_value('CONTROLLED') then
+	       conflict = true
+	    else
+	       role_change = true
+	       role = "controlling"
+	    end
+	 end
+      end
+      
+      local c = socket_info[fd]
+      local socket = c.socket
+      
+      if conflict then
+	 local rep = stun.new('error','binding',req.tx_id)
+	 rep:add_attr('ERROR-CODE',{number=487,reason="role conflict",reserve=0,class=0})
+	 local data = rep:encode()
+	 socket:write(data,peer_ip,peer_port)
+	 return	 
+      end
+      if role_change then
+	 priority_checklist()
+	 sort_checklist()
+      end
+      
+      local rep = stun.new('success','binding',req.tx_id)
+      rep:add_attr('XOR-PEER-ADDRESS',{ip=peer_ip,port=peer_port})
+      local data = rep:encode()
+      socket:write(data,peer_ip,peer_port)
+      -- find peer flex
+      local remotes = remote_streams[c.sid].locals
+      local i 
+      local new_remote = true
+      local pair 
+      local checklist = local_streams[c.sid].checklist
+      for i=1 ,#checklist do
+	 local t = checklist[i]
+	 local candidate = t.r
+	 if peer_ip == candidate.addr.ip and peer_port == candidate.addr.port then
+	    new_remote = false
+	    pair = t
+	    break
+	 end
+      end
+      if new_remote then
+	 local newcandi = {
+	    id = candi_id,
+	    type = 'CANDIDATE_TYPE_PEER_REFLEXIVE' ,
+	    priority = req:get_addr_value('PRIORITY'),
+	    addr = {ip = peer_ip,port=peer_port},
+	    cid = c.cid,
+	    sid = c.sid,
+	    fid =  math:random(1,bin.lshift(1,20))
+	 }
+	 candi_id = candi_id +1   
+	 table.insert(remotes,new_remote)
+	 local l = {}
+	 deep_copy(l,c)
+	 local pid = pair_id + 1
+	 pair_id = pair_id + 1
+	 local pair = {id=pid,sid=c.sid,cid=c.cid,l=l,r=newcandi,state = "PAIR_WAITING"}
+	 pair.priority = compute_pair_priority(pair)
+	 local que = local_streams[c.sid].trigger_que
+	 que:append({sid=c.sid,pair_id = pid})
+	 table.insert(local_streams[c.sid].checklist,pair)
+      else
+	 local state = pair.state
+	 local que = local_streams[pair.sid].trigger_que
+	 if use_candidate and role == "controlled" then
+	    pair.is_nominate = true 
+	 end
+	 if state == "PAIR_IN_PROGRESS" then
+	    pair.state = "PAIR_WAITING"
+	    que:append_if_not_exist(pair)
+	 elseif state == "PAIR_FROZEN" then
+	    pair.state = "PAIR_WAITING"
+	    que:append(pair)
+	 elseif state == "PAIR_COMPLETED" then
+	    if role == "controlled" and use_candidate then
+	       local i
+	       for i = 1, #local_streams[pair.sid].validlist do
+		  local p2 = local_streams[pair.sid].validlist[i]
+		  if p2.id == pair.id then
+		     p2.is_nominate = true
+		     break
+		  end
+	       end
+	    end
+	 elseif state == "PAIR_FAILED" then
+	    que:append(pair)
+	 else -- waiting
+	    que:append(pair)
+	 end
+      end
+      
+      if role == "controlled" then
+	 is_agent_succeed()
+      end
+      
+   else
+      assert(false,"not support!")
+   end
+end
+
 local function do_completed()
 end
 local function do_failed()
@@ -237,6 +529,7 @@ local function build_host()
 	    type = "CANDIDATE_TYPE_HOST",
 	    transport = "udp",
 	    addr = {ip=c.ip,port=c.port},
+	    base_addr = {ip=c.ip,port=c.port},
 	    socket = socket,
 	    cid = c.cid,
 	    user = c.user,
@@ -247,19 +540,70 @@ local function build_host()
       end
    end
 end
-local function build_gather_que()
+local function start_gather()
    local i 
    local stun = stun_servers[1] -- only one stun server in this version
-   for i in #(locals) do
-      table.insert(gather_que,{c=locals[i],stun_ip=stun.ip,stun_port=stun.port})
+   for i in #local_streams do
+      local stream = local_streams[i]
+      local que = new_que()
+      stream.gather_que = que
+      local j
+      for j=1,#locals do
+	 table.insert(que,{c=locals[i],stun_ip=stun.ip,stun_port=stun.port})
+      end
+      cell.timeout(0,function()
+		      gather_timer(ta,local_streams.sid)
+      end)
    end
-   gather_que.count = 1
+end
+
+local function gather_timer(time,sid)
+   local gather_que = local_streams[sid].gather_que
+   if gather_que:is_que_empty() then
+      return
+   end
+   local gather = gather_que:pop()
+   local tid = tx_id
+   gather_tx[tid] = {count=1,gather = gather}
+   tx_id = tx_id +1
+   local req = stun.new("request","binding",tx_id)
+   local data = req:encode()
+   local s = gather.c.socket
+   s:write(data,gather.stun_ip,gather.stun_port)
+   cell.timeout(time,function()
+		   gather_timer(time,sid)
+   end)
+   cell.timeout(time,function()
+		   gather_rto_timer(time,tid)
+   end)
+end
+
+
+local function gather_rto_timer(time,tid)
+   if gather_tx[tid] then
+      local count = gather_tx[tid].count
+      if count > max_count then
+	 gather_tx[tid] = nil
+	 is_gather_complete()
+	 return 
+      end
+      count = count + 1
+      gather_tx[tid].count = count
+      local gather = gather_tx[tid].gather
+      local req = stun.new("request","binding",tid)
+      local data = req:encode()
+      local s = gather.c.socket
+      s:write(data,gather.stun_ip,gather.stun_port)
+      cell.timeout(ta,function()
+		      gather_rto_timer(time,tid)
+      end)
+   end
 end
 cell.command {
    start = function(...)
       role = ...
       state = gather
-      cell.send(cell.self,"gather","gather")
+      start_gather()
       start_ev = cell.event()
       cell.wait(ev)
       return local_streams
@@ -297,7 +641,7 @@ local function build_pair()
 	    local c2 = remote_streams[i].locals
 	    if c1.cid == c2.cid then
 	       local pair = {id=pair_id,fid=""..c1.fid..c2.fid,l=c1,r=c2,
-			     state = "pair_frozen",
+			     state = "PAIR_FROZEN",
 			     sid = c1.sid,
 			     cid = c1.cid
 	       }
@@ -346,8 +690,57 @@ local function sort_checklist()
    end
 end
 
-local function trigger_check(sid)
+
+local function compute_candidate_priority(t,cid)
+   local type_value = {
+      CANDIDATE_TYPE_HOST = 120,
+      CANDIDATE_TYPE_PEER_REFLEXIVE = 110,
+      CANDIDATE_TYPE_SERVER_REFLEXIVE = 100,
+      CANDIDATE_TYPE_RELAYED = 60
+   }
+   assert(type_value[t])
+   return bin.lshift(1,24) * type_value[t] + bin.lshift(1,8) * 1 + 1*(256-cid) 
+end
+
+
+local function do_send_check(pair,tid)
+   local sid = pair.sid
+   local priority = compute_candidate_priority("CANDIDATE_TYPE_SERVER_REFLEXIVE",pair.cid)
+   local req = stun.new("request","binding",tid)
+   req:add_attr('PRIORITY',priority)
    
+   req:add_attr('USERNAME',pair.r.user ..":".. pair.l.user)
+   req:add_attr('PASSWORD',pair.r.pwd)
+   if role == "contrlling" then
+      if pair.nominate then
+	 req:add_attr('USE-CANDIDATE',1)
+      end
+      req:add_attr('ICE-CONTROLLING',tie_break)
+   else
+      req:add_attr('ICE-CONTROLLED',tie_break)
+   end
+   local data = req:encode()
+   local socket = pair.l.socket
+   socket:write(data,pair.r.addr.ip,pair.r.add.port)
+end
+
+local function trigger_check(sid)
+   local trigger = trigger_que:pop()
+   local sid = trigger.sid
+   local pair_id = trigger.pair_id
+   local tid = tx_id 
+   tx_id = tx_id + 1
+   check_tx[tid] = {count=1,sid=sid,pair_id=p1.id}
+   local pair = get_pair_by_id(sid,pair_id)
+   do_send_check(pair,tx_id)
+   pair.state = "PAIR_IN_PROGRESS"
+   cell.timer(ta,function()
+		 check_timer()
+   end)
+   cell.timer(ta,function()
+		 check_rto_timer(ta,tid)
+   end)
+
 end
 
 local function order_check(sid)
@@ -371,14 +764,96 @@ local function order_check(sid)
 		    return false
 		 end
    end)
-   local c = checklist[1]
-   if c.state == PAIR_WAITING or c.state == PAIR_FROZEN then
-      --do send
-   else
-      
-   end
 
+   local pair = checklist[1]
+   if pair.state == "PAIR_WAITING" or pair.state == "PAIR_FROZEN" then
+      local tid = tx_id
+      tx_id = tx_id +1
+      check_tx[tid] = {count=1,sid=sid,pair_id=p1.id}
+      do_send_check(pair,tid)
+      pair.state = "PAIR_IN_PROGRESS"
+      cell.timer(ta,function()
+		    check_timer()
+      end)
+      cell.timer(ta,function()
+		 check_rto_timer(ta,tid)
+      end)
+   end
+   
 end
+
+
+
+local function get_pair_by_id(sid,pair_id)
+   local pairs = local_streams[sid].checklist
+   local i
+   for i=1,#pairs do
+      if pair_id == pairs[i].id then
+	 return pairs[i]
+      end
+   end
+   assert(false,"should not happen!")
+end
+
+local function update_checklist_state(sid)
+   local checklist = local_streams[sid].checklist
+   local i
+   for i=1,#checklist do
+      local pair = checklist[i]
+      if pair.state == "PAIR_IN_PROGRESS" or pair.state == "PAIR_WAITING" or pair.state == " PAIR_FROZEN" then
+	 -- do nothing
+	 return
+      end
+   end
+   
+   local componets = streams_info.componets
+   local tmp = {}
+   for i = 1,#componets do
+      local cid = componets[i].cid
+      local j
+      local validlist = local_streams[sid].validlist
+      for j=1 ,#validlist do
+	 if validlist[j].cid == cid then
+	    table.insert(tmp,cid)
+	 end
+      end
+   end
+   
+   if #tmp == #componets then
+      local_streams[sid].checklist_state = "CHECKLIST_COMPLETED"
+   else
+      local_streams[sid].checklist_state = "CHECKLIST_FAILED"
+   end
+end
+
+local function check_rto_timer(time,txid)
+   local tx = check_tx[txid]
+   if not tx then
+      return 
+   end
+   local count = tx.count
+   local pair = get_pair_by_id(tx.sid,tx.pair_id)
+   if count > 3 then
+      pair.state = "PAIR_FAILED"
+      update_checklist_state(tx.sid)
+      --when first media failed,start other fix me
+      if tx.sid == 1 then
+	 if local_streams[sid].checklist_state == "CHECKLIST_FAILED" then
+	    local j 
+	    for j=2,#local_streams do
+	       start_check(j)
+	    end
+	 end
+      end
+   else      
+      do_send_check(pair,tx.tx_id)
+      tx.count = count +1
+      cell.timeout(time,function()
+		      check_rto_timer(time,txid)
+      end)
+   end
+end
+
 local function check_timer(time,sid)
    assert(sid)
    local stream = local_streams[sid]
@@ -387,45 +862,95 @@ local function check_timer(time,sid)
    else
       trigger_check(sid)
    end
-   cell.timeout(time,function()
-		   check_timer(time,sid)
-   end)
+--  cell.timeout(time,function()
+--		   check_timer(time,sid)
+--   end)
+
 end
-local function start_check()
-   local stream = local_streams[1]
-   cell.timeout(ta,function()
-		   check_timer(ta,stream.sid)
-		   end
-   )
+
+local function is_checklist_frozen(sid)
+   local i
+   for i=1,#local_streams[sid].checklist do 
+      local pair = local_streams[sid].checklist[i]
+      if pair.state ~= "PAIR_FROZEN" then
+	 return false
+      end
+   end
+   return true
+end
+local function start_check(sid)
+   local stream = local_streams[sid]
+   if is_checklist_frozen(sid) then 
+      cell.timeout(ta,function()
+		      check_timer(ta,sid)
+		      end
+      )
+   end
 end
 
 local function form_checklist()
    build_pair()
    priority_checklist()
    sort_checklist()
-   start_check()
+   start_check(1) -- start first media
 end
 local function  do_ice_handshake()
    form_checklist()
 end
 cell.message {
-   gather = gatherF,
-   gather_rto = gatherF,
    set_remotes = function(...)
       remote_streams = ...
       assert(remote_streams)
       assert(type(remote_streams) == "table")
       do_ice_handshake()
    end,
-   accept_udp = function(msg,sz,peer_ip,peer_port)
+   send = function(sid,cid,msg,sz)
+      local validlist = local_streams[sid].validlist
+      local i 
+      for i=1,#validlist do
+	 local pair = validlist[i]
+	 if pair.cid == cid then
+	    local socket = pair.l.socket
+	    if opts.dtls then
+	       local srtp = pair.srtp
+	       sz = lua_srtp.protected(srtp,msg,sz)
+	       socket:write_raw(msg,sz,pair.r.addr.ip,pair.r.addr.port)
+	    else
+	       socket:write(msg,pair.r.addr.ip,pair.r.addr.port)
+	    end
+	    return 
+	 end
+      end
+      assert(false,"should not happen,no valid pair!")
+   end,
+   accept_udp = function(fd,msg,sz,peer_ip,peer_port)
       --todo peek msg
-      local ok,req = stun.decode(msg,sz)
-      if ok then
+      local pos,b1 = bin.unpack(">C",msg,sz)
+      if b1 == 0x16 then --dtls
+      elseif bin:rshif(b1,6) == 0x0 then
+	 local ok,req = stun.decode(msg,sz)
 	 if states[state] then
-	    states[state]("stun",req,peer_ip,peer_port)
+	    states[state](req,peer_ip,peer_port)
 	 end
       else
-	 print("error",req)
+	 
+	 local c = socket_info[fd]
+	 local sid = c.sid
+	 local cid = c.cid
+	 local srtp
+	 if opts.dtls then
+	    local validlist = local_streams[sid].validlist
+	    local j
+	    for j=1 ,#validlist do
+	       if cid == validlist[j].cid then
+		  srtp = validlist[j].srtp
+		  break
+	       end
+	    end
+	    assert(srtp)
+	    sz = lua_srtp.protected(srtp,msg,sz)
+	 end
+	 cell.send(opts.client,ice_agent,cell.self,sid,cid,msg,sz)
       end
    end
 }

@@ -326,9 +326,9 @@ function socket:dtls_open(cfg)
    if s then
       socket_ssl[fd]= {type="dtls",ssl=s,state="new",mode=cfg.mode} --sever or client
       cell.ioctl(fd,1,1) --new
-      return "ok"
+      return true,s
    else
-      return "error",msg
+      return false,msg
    end
 end
 
@@ -372,14 +372,14 @@ function do_handshake(fd)
       print("handshake",err)
       if err == 0 then
       	 cell.ioctl(fd,1,2) --completed
-	 return "ok"  
+	 return true
       elseif err==2  then
 	 handshake_wait(fd)
       elseif err==3  then
 	 handshake_wait(fd)
       else
-	 print("errrrrrrrrr",err)
-	 return "error",err
+	 print("dtls error:",err)
+	 return false,err
       end
    end
 end
@@ -400,6 +400,10 @@ function socket:disconnect()
 	cell.send(sockets_fd, "disconnect", fd)
 end
 
+function socket:write_raw(msg,sz,...)
+   local fd = self.__fd
+   cell.rawsend(sockets_fd,6,fd,sz,msg,...)
+end
 function socket:write(msg,...)
 	local fd = self.__fd
 	local sz,msg=csocket.sendpack(msg)
@@ -536,7 +540,7 @@ cell.dispatch {
 		   else
 		      local peer_ip,peer_port = ...
 		      local co = coroutine.create(function()
-						     cell.send(udp,"accept_udp",msg,sz,peer_ip,peer_port)
+						     cell.send(udp,"accept_udp",fd,msg,sz,peer_ip,peer_port)
 						     return "EXIT"
 		      end)
 		      suspend(nil, nil, co, coroutine.resume(co))

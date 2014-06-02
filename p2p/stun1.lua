@@ -24,8 +24,10 @@ function stun.new(c,m,t,a)
    return setmetatable(s,{__index = stun_meta})
 end 
 
-
-local function  decode_attr_addr(data,len)
+function stun_meta:add_attr(k,v)
+   self.attrs[k] = v
+end
+local function  decode_attr_addr(data,len,sz,pos)
    assert(len==8)
    local v = {}
    local pos1
@@ -34,28 +36,31 @@ local function  decode_attr_addr(data,len)
    return pos1,v
 end
 
-local function decode_attr_int(data,len)
+local function decode_attr_int(data,len,sz,pos)
    assert(len==4 or len == 8)
    if len == 4 then
-      return bin.unpack(">S",data)
+      return bin.unpack(">S",data,sz,pos)
    else
-      return bin.unpack(">L",data)
+      return bin.unpack(">L",data,sz,pos)
    end
 end
 
-local function decode_attr_string(data,len)
-   return bin.unpack(">A"..len,data)
+local function decode_attr_string(data,len,sz,pos)
+   return bin.unpack(">A"..len,data,sz,pos)
 end
 
-local function decode_attr_err(data,len)
+local function decode_attr_err(data,len,sz,pos)
    local v = {}
    local pos1 
    local t = len - 4
-   pos1,v.reserve,v.class,v.number,v.reason = bin.unpack(">SCCA"..t,data)
+   pos1,v.reserve,v.class,v.number,v.reason = bin.unpack(">SCCA"..t,data,sz,pos)
    v.class = bin.xor(v.class,oxF) -- only 4 bit for class
    return pos1,v 
 end
-
+local function encode_attr_err(atype,err)
+   assert(type(err) == "table")
+   return bin.pack(">SCCA",err.reserve,err.class,err.number,err.reason)
+end
 
 local function encode_attr_addr(atype,addr)
    assert(type(addr)=="table")
@@ -100,7 +105,7 @@ local encode_attr = {
    ['USERNAME'] = function(...) return encode_attr_string(0x0006,...) end,
    ['PASSWORD'] = function(...) return  encode_attr_string(0x0007,...) end,
    ['MESSAGE-INTEGRITY'] = function(...) return encode_attr_string(0x0008,...) end,
-   ['ERROR-CODE'] = function(...) return  decode_attr_err(0x0009,...) end,
+   ['ERROR-CODE'] = function(...) return  encode_attr_err(0x0009,...) end,
    ['UNKNOWN-ATTRIBUTES'] = function(...) return  encode_attr_string(0x000a,...) end,
    ['REFLECTED-FROM'] = function(...) return  encode_attr_string(0x000b,...) end,
    ['CHANNEL-NUMBER'] = function(...) return encode_attr_int(0x000c,...) end,
@@ -239,20 +244,20 @@ function stun_meta:encode()
 end
 function stun.decode(data,sz,key)
    local rep = stun.new()
-   local len  = sz - 8 - 4
+   local len  = sz - 8 
    local f = ">SSA" .. size..">CCCCI"
-   local pos,s_type,len,data,c1,c2,c3,c4,crc= bin.unpack(">A"..sz,bin,sz)
+   local pos,data
    --check finger print
    if sz > 20 + 8 then
+      local pos,d1,c1,c2,c3,c4,crc= bin.unpack(">A"..len,data,sz)
       if c1 == 0x080 and c1 == 0x28 and c3 == 0x0 and c4 == 0x04 then
 	 local crc1 = bit32.bxor(crc32.hash(msg),0x5354554e)
 	 if crc1 ~= crc then
 	    return false
 	 end
-	 len = len -8
 	 req.fingerprint = true
+	 sz = sz -8
       else
-	 data = bin.pack(">ACCCCI",data,c1,c2,c3,c4,crc)
 	 req.fingerprint = false
 	 print("no crc was found in stun message")
       end
@@ -260,18 +265,20 @@ function stun.decode(data,sz,key)
       req.fingerprint = false
       print("no crc was found in stun message")
    end   
+   pos = 0
    --check integrity
    if key then
-      if len < 20 + 24 then
+      if sz < 20 + 24 then
 	 return false
       end
-      len = len -24
+      len = sz -24
       f = ">A"..len.."CCCC".."A20"
-      pos,data,c1,c2,c3,c4,finger  = bin.unpack(f,data)
+      pos,data,c1,c2,c3,c4,finger  = bin.unpack(f,data,sz)
       if c1 == 0x000 and c1 == 0x08 and c3 == 0x00 and c4 == 0x14 and finger then
 	 local finger2 = crypto:sha_mac(key,data)
 	 if finger == finger2 then
 	    req.integrity = true
+	    sz = sz - 24
 	 else
 	    return false
 	 end
@@ -280,7 +287,13 @@ function stun.decode(data,sz,key)
       end
 
    end
-   local pos,magic_cookie,tmp,tx_id,data = bin.unpack(">IILA"..(len-16),data)
+   local pos,s_type,len,magic_cookie,tmp,tx_id,data = bin.unpack(">SSIILA"..(len-16),data)
+   if req.fingerprint then
+      len = len - 8
+   end
+   if req.INTEGRITY then
+      len = len -24
+   end
    --hack google/msn data
    if s_type == 0x0115 then
       s_type =0x0017
@@ -318,19 +331,22 @@ function stun.decode(data,sz,key)
    }
    rep.class = class2str[class]
    rep.tx_id = tx_id
-   while string.len(data) do
-      local t,len,tt
-      pos, t,len= bin.unpack(">SS", data)      
+   
+   pos = 0 
+   while pos < len do
+      local t,type_len,tt
+      pos,t,type_len= bin.unpack(">SS",data,sz,pos)      
       local f = decode_attr[t]
       if f ~= nil then
-	 pos,key,value = f(data,len)
+	 pos,key,value = f(data,type_len,sz,pos)
 	 rep.attrs[key] = value
       else
-	 pos,tt = bin.unpack(">A"..len)
+	 pos,tt = bin.unpack(">A"..type_len)
 	 rep.attrs[t] = tt
 	 print("warning unknow type:",t)
       end
-      data = string.sub(data,pos)
+      sz = sz - 4 - type_len
+      len = len - 4 - type_len
    end
       return rep
 end

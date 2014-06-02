@@ -19,7 +19,7 @@ function cell.main()
 --      verify = {"peer", "fail_if_no_peer_cert"},
 --      options = {"all", "no_sslv2"}
    }
-   local port = 20220
+   local port = 9998
    local fd = cell.open(9002,cell.self)
    --fd:write("hello world","127.",port)
    --fd:connect_udp("127.0.0.1",9998)
