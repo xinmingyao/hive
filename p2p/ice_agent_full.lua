@@ -1,6 +1,11 @@
 local bit = require "bit32"
 local math = require "math"
 local stun = require "p2p.stun1"
+local ssl = require "ssl"
+local lua_srtp = require "lua_srtp"
+-- streams_info-->{sid,[{cid,ip,port,user,pws}]}
+-- stun_servers-->[{ip,port}]
+--opts --> {client,dtls,dtls_config}
 local streams_info,stun_servers,opts
 local role
 local local_streams = {}
@@ -11,19 +16,35 @@ local gather_tx = {}
 local check_tx ={}
 
 local socket_info = {}
-local start_ev
-local state
+local start_ev 
+local state = "gather"
 local candi_id = 1
 local pair_id = 1
 local tx_id = 1
 local pair_id = 1
 local ta = 20 -- timeout for gather and check
-local max_count = 3
-local que_meta = {}
-local ssl = require "ssl"
-local lua_srtp = require "lua_srtp"
+local max_count = 3 -- max timeout
+local que_meta = {} 
+
+local function get_txid()
+   local t = tx_id
+   tx_id = tx_id + 1
+   return t
+end
+
+local function get_pairid()
+   local t = pair_id 
+   pair_id = pair_id +1
+   return t
+end
+
+local function get_candi_id()
+   local t = candi_id 
+   candi_id = candi_id + 1
+   return t
+end
 local function new_que()
-   local q = {count=0,data={}}
+   local q = {count=1,data={}}
    return setmetatable(q,{__index=que_meta})
 end
 
@@ -34,8 +55,15 @@ end
 function que_meta:append_if_not_exist(v)
    local i 
    for i=self.count,#self do
-      if v.id == self[i].id then
-	 return
+      if v.id then 
+	 if v.id == self[i].id then
+	    return
+	 end
+      end
+      if v.pair_id  then
+	 if v.pair_id == self[i].pair_id then
+	    return 
+	 end
       end
    end
    table.insert(self.data,v)
@@ -48,9 +76,6 @@ function que_meta:pop()
    local count = self.count
    self.count = count + 1
    return self.data[count]
-end
-local function is_gather_que_empyt()
-   return gather_que.count > #(gather_que)
 end
 
 local function deep_copy(src,dst)
@@ -86,14 +111,14 @@ local function del_redudant()
       local num1 = #(locals)
        while j<=num1  do
 	 local c = stream.locals[j]
-	 local k = 1
-	 local num2 = #(locals) 
-	 for k=1,num2 do
+	 local k 
+	 for k = 1,#(locals)  do
 	    local c1 = stream.locals[k]
 	    if c.addr.ip == c1.addr.ip and c.addr.port == c1.addr.port and c.priority<c1.priority then
 	       table.remove(locals,j)
 	       j = j-1
-	       num = num -1
+	       num1 = num1 -1
+	       break
 	    end
 	 end
 	 j = j+1
@@ -107,6 +132,7 @@ local function compute_candidate_fid()
    for i=1 , #local_streams do
       local stream = local_streams[i]
       local locals = stream.locals
+      local j
       for j=1 , #locals do
 	 local c = locals[j]
 	 local key 
@@ -121,6 +147,7 @@ local function compute_candidate_fid()
 	    fid = fids.key
 	 else
 	    fid = math.random(1,bit.lshift(1,20))
+	    fids.key = fid
 	 end
 	 c.fid = fid
       end
@@ -207,10 +234,12 @@ local function regula_nominate_timer(time,sid)
    else
       local index = que:pop()
       local pair = local_streams[sid].validlist[index]
-      local tid = tx_id + 1
-      tx_id = tx_id + 1
+      local tid = get_txid()
       check_tx[tid] = {sid=sid,index= index,count=1}
       do_send_check(pair,tid)
+      cell.timer(ta,function()
+		    regula_nominate_timer(time,sid)
+      end)
       cell.timer(ta,function()
 		    nominate_rto_timer(ta,tid)
       end)
@@ -232,7 +261,7 @@ local function start_regula_nominate(sid)
       for i = 1,#validlist do
 	 que:append(i)
       end
-      cell.timer(ta,function()
+      cell.timer(0,function()
 		    regula_nominate_timer(ta,sid)
       end)
    end
@@ -242,10 +271,9 @@ local function is_agent_succeed()
    local i
    local failed = true
    for i =1 ,#local_streams do
-      if local_streams[i].checklist_state == "CHECKLIST_FAILED" then
-	 failed = failed and true
-      else
-	 failed = failed and false
+      if local_streams[i].checklist_state ~= "CHECKLIST_FAILED" then
+	 failed = false
+	 break
       end
    end
    if failed then
@@ -270,31 +298,34 @@ local function is_agent_succeed()
 	 end
       end
    end
+
    if opts.dtls then
-      
       local i
       for i =1 ,#local_streams do
-	 local validlist = local_streams[i]
-	 local j
-	 for j=1,#validlist do
-	    local pair = validlist[j]
-	    local socket = pair.l.c.socket
-	    local r,msg
-	    local cfg = opts.dtls_config
-	    assert(cfg)
-	    if role == "controlling" then
-	       r,msg = socket:dtls_listen(cfg,pair.r.addr.ip,pair.r.addr.port)
-	    else
-	       r,msg  = socket:dtls_connect(cfg,pair.r.addr.ip,pair.r.addr.port)
-	    end
-	    if r then
-	       local srtp = lua_srtp.new()
-	       local send_key,receiving_key =  ssl.dtls_session_keys(r)
-	       lua_srtp.set_rtp(srtp,send_key,receiving_key)
-	       pair.srtp = srtp
-	       pair.ssl = r
-	    else
-	       print("error:",msg)
+	 if local_streams[i].checklist_state == "CHECKLIST_COMPLETED" then --not for failed component
+	    local validlist = local_streams[i]
+	    local j
+	    for j=1,#validlist do
+	       local pair = validlist[j]
+	       local socket = pair.l.c.socket
+	       local r,msg
+	       local cfg = opts.dtls_config
+	       assert(cfg)
+	       if role == "controlling" then
+		  r,ssl_socket = socket:dtls_listen(cfg,pair.r.addr.ip,pair.r.addr.port)
+	       else
+		  r,ssl_socket  = socket:dtls_connect(cfg,pair.r.addr.ip,pair.r.addr.port)
+	       end
+	       if r then
+		  local srtp = lua_srtp.new()
+		  local send_key,receiving_key =  ssl.dtls_session_keys(ssl_socket)
+		  lua_srtp.set_rtp(srtp,send_key,receiving_key)
+		  pair.srtp = srtp
+		  pair.ssl = ssl_socket
+	       else
+		  cell.send(opts.client,agent_fail,"dtls_error",ssl_socket)
+		  print("error:",ssl_socket)
+	       end
 	    end
 	 end
       end
@@ -321,8 +352,8 @@ local function do_running(req,fd,peer_ip,peer_port)
       end
       -- new role,recompute priority
       priority_checklist()
-      sort_checklist()
-      check_tx[tid] = nil
+      sort_checklist()  
+
       local pair = get_pair_by_id(tx.sid,tx.pair_id)
       pair.state = "PAIR_WAITING"
       trigger_que:append({sid=tx.sid,pair_id=tx.pair_id})
@@ -368,8 +399,7 @@ local function do_running(req,fd,peer_ip,peer_port)
 	    --deep_copy(remote,pair.r)
 	    deep_copy(validpair,pair)--{id = pair_id,l=c1,r=remote,cid=pair.cid,sid=pair.sid}
 	    validpair.l = c1 
-	    validpair.id = pair_id
-	    pair_id = pair_id +1 
+	    validpair.id = get_pairid()
 	    validpair.priority = compute_pair_priority(validpair)
 	 end
       end
@@ -535,7 +565,7 @@ local function build_host()
 	    user = c.user,
 	    pwd = c.pwd,
 	    sid = stream.sid }
-	 socket_info[socket] = candidate
+	 socket_info[socket.__fd] = candidate
 	 table.insert(local_streams[i].locals,candidate)
       end
    end

@@ -334,6 +334,7 @@ end
 
 function socket:dtls_listen(cfg,ip,port)
    cell.connect_udp(fd,ip,port)
+   cfg.mode = "server"
    return socket.dtls_open(self,cfg)
 end
 
@@ -343,12 +344,13 @@ function socket:connect_udp(...)
 end
 function socket:dtls_connect(cfg,ip,port)
    local fd = self.__fd
+   cfg.mode = "client"
    cell.connect_udp(fd,ip,port)
    if socket.dtls_open(self,cfg) then
       local r,msg =  do_handshake(fd)
       if r then
 	 cell.ioctl(fd,1,2) --completed
-	 return r
+	 return r,msg
       else
 	 return r,msg
       
@@ -372,7 +374,7 @@ function do_handshake(fd)
       print("handshake",err)
       if err == 0 then
       	 cell.ioctl(fd,1,2) --completed
-	 return true
+	 return true,ssl_socket
       elseif err==2  then
 	 handshake_wait(fd)
       elseif err==3  then

@@ -21,6 +21,6 @@ function peer.new(streams_info,stun_servers,opts)
    opts.client = cell.self
    local pid = cell.cmd("launch", "p2p.ice_agent_full",streams_info,stun_servers,opts)
    p.pid = pid
-   return setmetatable(s,{__index = peer_meta})
+   return setmetatable(p,{__index = peer_meta})
 end
 return peer
