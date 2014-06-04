@@ -236,6 +236,7 @@ local function regula_nominate_timer(time,sid)
       local pair = local_streams[sid].validlist[index]
       local tid = get_txid()
       check_tx[tid] = {sid=sid,index= index,count=1}
+      pair.is_nominate = true
       do_send_check(pair,tid)
       cell.timer(ta,function()
 		    regula_nominate_timer(time,sid)
@@ -382,17 +383,19 @@ local function do_running(req,fd,peer_ip,peer_port)
 	    deep_copy(validpair,pair)
 	 else -- peer flex
 	    local priority = req:get_addr_value('PRIORITY')
-	    c1 = {fid=pair.l.fid,
-		  priority = priority,
-		  type = "CANDIDATE_TYPE_PEER_REFLEXIVE",
-		  transport = "udp",
-		  addr= {ip=addr.ip,port=addr.port},
-		  base_addr = {ip=pair.l.base_addr.ip,port = pair.l.base_addr.port},
-		  socket = pair.l.socket,
-		  cid = pair.l.cid,
-		  sid = pair.l.sid,
-		  user = pair.l.user,
-		  pwd = pair.l.pwd
+	    c1 = {
+	       id= get_candi_id(),
+	       fid=pair.l.fid,
+	       priority = priority,
+	       type = "CANDIDATE_TYPE_PEER_REFLEXIVE",
+	       transport = "udp",
+	       addr= {ip=addr.ip,port=addr.port},
+	       base_addr = {ip=pair.l.base_addr.ip,port = pair.l.base_addr.port},
+	       socket = pair.l.socket,
+	       cid = pair.l.cid,
+	       sid = pair.l.sid,
+	       user = pair.l.user,
+	       pwd = pair.l.pwd
 	    }
 	    table.insert(local_streams[tx.sid].locals,c1)
 	    --local remote = {}
@@ -450,11 +453,12 @@ local function do_running(req,fd,peer_ip,peer_port)
       end
       
       local rep = stun.new('success','binding',req.tx_id)
+      local priority = req:get_addr_value('PRIORITY',priority)
       rep:add_attr('XOR-PEER-ADDRESS',{ip=peer_ip,port=peer_port})
+      rep:add_attr('PRIORITY',priority)
       local data = rep:encode()
       socket:write(data,peer_ip,peer_port)
       -- find peer flex
-      local remotes = remote_streams[c.sid].locals
       local i 
       local new_remote = true
       local pair 
@@ -470,7 +474,7 @@ local function do_running(req,fd,peer_ip,peer_port)
       end
       if new_remote then
 	 local newcandi = {
-	    id = candi_id,
+	    id = get_candi_id(),
 	    type = 'CANDIDATE_TYPE_PEER_REFLEXIVE' ,
 	    priority = req:get_addr_value('PRIORITY'),
 	    addr = {ip = peer_ip,port=peer_port},
@@ -478,12 +482,11 @@ local function do_running(req,fd,peer_ip,peer_port)
 	    sid = c.sid,
 	    fid =  math:random(1,bin.lshift(1,20))
 	 }
-	 candi_id = candi_id +1   
+	 local remotes = remote_streams[c.sid].locals
 	 table.insert(remotes,new_remote)
 	 local l = {}
 	 deep_copy(l,c)
-	 local pid = pair_id + 1
-	 pair_id = pair_id + 1
+	 local pid = get_pairid()
 	 local pair = {id=pid,sid=c.sid,cid=c.cid,l=l,r=newcandi,state = "PAIR_WAITING"}
 	 pair.priority = compute_pair_priority(pair)
 	 local que = local_streams[c.sid].trigger_que
@@ -497,10 +500,10 @@ local function do_running(req,fd,peer_ip,peer_port)
 	 end
 	 if state == "PAIR_IN_PROGRESS" then
 	    pair.state = "PAIR_WAITING"
-	    que:append_if_not_exist(pair)
+	    que:append_if_not_exist({sid=pair.sid,pair_id=pair.id})
 	 elseif state == "PAIR_FROZEN" then
 	    pair.state = "PAIR_WAITING"
-	    que:append(pair)
+	    que:append({sid=pair.sid,pair_id=pair.id})
 	 elseif state == "PAIR_COMPLETED" then
 	    if role == "controlled" and use_candidate then
 	       local i
@@ -513,9 +516,11 @@ local function do_running(req,fd,peer_ip,peer_port)
 	       end
 	    end
 	 elseif state == "PAIR_FAILED" then
-	    que:append(pair)
+	    pair.state = "PAIR_WAITING"
+	    que:append({sid=pair.sid,pair_id=pair.id})
 	 else -- waiting
-	    que:append(pair)
+	    pair.state = "PAIR_WAITING"
+	    que:append({sid=pair.sid,pair_id=pair.id})
 	 end
       end
       
@@ -552,8 +557,7 @@ local function build_host()
       for j in #(cps) do
 	 local c = cps[j]
 	 local socket = cell.open(c.port,cell.self)
-	 local id = candi_id
-	 candi_id = candi_id +1
+	 local id = get_candi_id()
 	 local candidate = {
 	    id = id,
 	    type = "CANDIDATE_TYPE_HOST",
@@ -577,6 +581,7 @@ local function start_gather()
       local stream = local_streams[i]
       local que = new_que()
       stream.gather_que = que
+      local locals = stream.locals
       local j
       for j=1,#locals do
 	 table.insert(que,{c=locals[i],stun_ip=stun.ip,stun_port=stun.port})
@@ -653,8 +658,9 @@ local function build_pair()
    local i
    for i=1,#local_streams do
       stream = local_streams[i]
-      stream.checklist = {}
-      local l2 = deep_copy(stream.locals)
+      stream.checklist = {state="CHECKLIST_RUNNING"}
+      local l2 = {}
+      deep_copy(l2,stream.locals)
       local j=1
       --remove not host candidate
       while j<=#l2 do
@@ -667,16 +673,16 @@ local function build_pair()
       for j=1,#l2 do
 	 local k
 	 local c1 = l2[j]
-	 for k=1,#(remote_streams[i].locals) do 
-	    local c2 = remote_streams[i].locals
+	 local remotes = remote_streams[i].locals
+	 for k=1,#(remotes) do 
+	    local c2 = remotes[k]
 	    if c1.cid == c2.cid then
-	       local pair = {id=pair_id,fid=""..c1.fid..c2.fid,l=c1,r=c2,
+	       local pair = {id=get_pairid(),fid=""..c1.fid..c2.fid,l=c1,r=c2,
 			     state = "PAIR_FROZEN",
 			     sid = c1.sid,
 			     cid = c1.cid
-	       }
+			    }
 	       table.insert(stream.checklist,pair)
-	       pair_id = pair_id + 1
 	    end
 	 end
       end
@@ -742,7 +748,7 @@ local function do_send_check(pair,tid)
    req:add_attr('USERNAME',pair.r.user ..":".. pair.l.user)
    req:add_attr('PASSWORD',pair.r.pwd)
    if role == "contrlling" then
-      if pair.nominate then
+      if pair.is_nominate then
 	 req:add_attr('USE-CANDIDATE',1)
       end
       req:add_attr('ICE-CONTROLLING',tie_break)
@@ -755,17 +761,17 @@ local function do_send_check(pair,tid)
 end
 
 local function trigger_check(sid)
+   local trigger_que = local_streams[sid].trigger_que
    local trigger = trigger_que:pop()
    local sid = trigger.sid
    local pair_id = trigger.pair_id
-   local tid = tx_id 
-   tx_id = tx_id + 1
+   local tid = get_txid()
    check_tx[tid] = {count=1,sid=sid,pair_id=p1.id}
    local pair = get_pair_by_id(sid,pair_id)
    do_send_check(pair,tx_id)
    pair.state = "PAIR_IN_PROGRESS"
    cell.timer(ta,function()
-		 check_timer()
+		 check_timer(ta,sid)
    end)
    cell.timer(ta,function()
 		 check_rto_timer(ta,tid)
@@ -797,13 +803,12 @@ local function order_check(sid)
 
    local pair = checklist[1]
    if pair.state == "PAIR_WAITING" or pair.state == "PAIR_FROZEN" then
-      local tid = tx_id
-      tx_id = tx_id +1
+      local tid = get_txid()
       check_tx[tid] = {count=1,sid=sid,pair_id=p1.id}
       do_send_check(pair,tid)
       pair.state = "PAIR_IN_PROGRESS"
       cell.timer(ta,function()
-		    check_timer()
+		    check_timer(ta,sid)
       end)
       cell.timer(ta,function()
 		 check_rto_timer(ta,tid)
@@ -960,7 +965,7 @@ cell.message {
       elseif bin:rshif(b1,6) == 0x0 then
 	 local ok,req = stun.decode(msg,sz)
 	 if states[state] then
-	    states[state](req,peer_ip,peer_port)
+	    states[state](req,fd,peer_ip,peer_port)
 	 end
       else
 	 
