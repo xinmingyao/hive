@@ -550,7 +550,7 @@ local function build_host()
    local i
    for i in #(streams_info) do
       local stream = streams_info[i]
-      local cps = stream.componets
+      local cps = stream.components
       local j
       local_streams[i].sid = stream.sid
       local_streams[i].locals = {}
@@ -841,7 +841,7 @@ local function update_checklist_state(sid)
       end
    end
    
-   local componets = streams_info.componets
+   local componets = streams_info.components
    local tmp = {}
    for i = 1,#componets do
       local cid = componets[i].cid
