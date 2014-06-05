@@ -985,7 +985,7 @@ cell.message {
 	    assert(srtp)
 	    sz = lua_srtp.protected(srtp,msg,sz)
 	 end
-	 cell.send(opts.client,ice_agent,cell.self,sid,cid,msg,sz)
+	 cell.send(opts.client,ice_receive,cell.self,sid,cid,msg,sz)
       end
    end
 }
