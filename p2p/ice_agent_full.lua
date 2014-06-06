@@ -1,3 +1,5 @@
+local bin = require "cell.binlib"
+local cell = require "cell"
 local bit = require "bit32"
 local math = require "math"
 local stun = require "p2p.stun1"
@@ -17,6 +19,7 @@ local check_tx ={}
 
 local socket_info = {}
 local start_ev 
+local set_remotes_ev
 local state = "gather"
 local candi_id = 1
 local pair_id = 1
@@ -25,6 +28,18 @@ local pair_id = 1
 local ta = 20 -- timeout for gather and check
 local max_count = 3 -- max timeout
 local que_meta = {} 
+
+
+local function compute_candidate_priority(t,cid)
+   local type_value = {
+      CANDIDATE_TYPE_HOST = 120,
+      CANDIDATE_TYPE_PEER_REFLEXIVE = 110,
+      CANDIDATE_TYPE_SERVER_REFLEXIVE = 100,
+      CANDIDATE_TYPE_RELAYED = 60
+   }
+   assert(type_value[t])
+   return bit.lshift(1,24) * type_value[t] + bit.lshift(1,8) * 1 + 1*(256-cid) 
+end
 
 local function get_txid()
    local t = tx_id
@@ -80,7 +95,7 @@ end
 
 local function deep_copy(src,dst)
    local k,v
-   for k,v in dst do
+   for k,v in pairs(dst) do
       if type(v) == "table" then
 	 local v1 = {}
 	 deep_copy(v1,v)
@@ -90,7 +105,7 @@ local function deep_copy(src,dst)
       end
    end
    local i
-   for i in #dst do
+   for i in ipairs(dst) do
       local v = dst[i]
       if type(v) == "table" then
 	 local v1 = {}
@@ -137,9 +152,9 @@ local function compute_candidate_fid()
 	 local c = locals[j]
 	 local key 
 	 if c.type == "CANDIDATE_TYPE_RELAYED" then
-	    key = c.transport .. c.type ..c.stun_server.ip
+	    key = c.transport .. c.type ..c.stun_ip
 	 else
-	    key = c.transport .. c.type ..c.ip
+	    key = c.transport .. c.type ..c.addr.ip
 	 end
 	
 	 local fid
@@ -183,7 +198,7 @@ local function is_gather_complete()
    end
    state = "running"
    do_gather_complete()
-   cell.resume(start_ev)
+   cell.wakeup(start_ev)
 end
 
 local function do_gather(req)
@@ -199,7 +214,11 @@ local function do_gather(req)
 		 cid = host.cid,
 		 sid = host.sid,
 		 user = host.user,
-		 pwd = host.pwd}	       
+		 priority = compute_candidate_priority("CANDIDATE_TYPE_SERVER_REFLEXIVE",c.cid),
+		 pwd = host.pwd,
+		 stun_ip = gather.stun_ip,
+		 stun_port = gather.stun_port
+      }	       
       table.insert(local_streams[sid].locals,c)
       gather_tx[req.tx_id] = nil
       is_gather_complete()
@@ -279,6 +298,7 @@ local function is_agent_succeed()
    end
    if failed then
       state = "failed"
+      cell.wakeup(set_remotes,true,state)
       return
    end
    
@@ -324,14 +344,16 @@ local function is_agent_succeed()
 		  pair.srtp = srtp
 		  pair.ssl = ssl_socket
 	       else
-		  cell.send(opts.client,agent_fail,"dtls_error",ssl_socket)
 		  print("error:",ssl_socket)
+		  cell.wakeup(set_remotes,false,"dtls_error")
+		  --cell.send(opts.client,agent_fail,"dtls_error",ssl_socket)
 	       end
 	    end
 	 end
       end
    end
    state = "completed"
+   cell.wakeup(set_remotes,true,state)
    return
 end
 
@@ -548,13 +570,14 @@ local states = {
 
 local function build_host()
    local i
-   for i in #(streams_info) do
+   for i=1, #(streams_info) do
       local stream = streams_info[i]
       local cps = stream.components
       local j
+      local_streams[i] = {}
       local_streams[i].sid = stream.sid
       local_streams[i].locals = {}
-      for j in #(cps) do
+      for j=1, #(cps) do
 	 local c = cps[j]
 	 local socket = cell.open(c.port,cell.self)
 	 local id = get_candi_id()
@@ -568,49 +591,12 @@ local function build_host()
 	    cid = c.cid,
 	    user = c.user,
 	    pwd = c.pwd,
+	    priority = compute_candidate_priority("CANDIDATE_TYPE_HOST",c.cid),
 	    sid = stream.sid }
 	 socket_info[socket.__fd] = candidate
 	 table.insert(local_streams[i].locals,candidate)
       end
    end
-end
-local function start_gather()
-   local i 
-   local stun = stun_servers[1] -- only one stun server in this version
-   for i in #local_streams do
-      local stream = local_streams[i]
-      local que = new_que()
-      stream.gather_que = que
-      local locals = stream.locals
-      local j
-      for j=1,#locals do
-	 table.insert(que,{c=locals[i],stun_ip=stun.ip,stun_port=stun.port})
-      end
-      cell.timeout(0,function()
-		      gather_timer(ta,local_streams.sid)
-      end)
-   end
-end
-
-local function gather_timer(time,sid)
-   local gather_que = local_streams[sid].gather_que
-   if gather_que:is_que_empty() then
-      return
-   end
-   local gather = gather_que:pop()
-   local tid = tx_id
-   gather_tx[tid] = {count=1,gather = gather}
-   tx_id = tx_id +1
-   local req = stun.new("request","binding",tx_id)
-   local data = req:encode()
-   local s = gather.c.socket
-   s:write(data,gather.stun_ip,gather.stun_port)
-   cell.timeout(time,function()
-		   gather_timer(time,sid)
-   end)
-   cell.timeout(time,function()
-		   gather_rto_timer(time,tid)
-   end)
 end
 
 
@@ -626,6 +612,7 @@ local function gather_rto_timer(time,tid)
       gather_tx[tid].count = count
       local gather = gather_tx[tid].gather
       local req = stun.new("request","binding",tid)
+      req.fingerprint = false
       local data = req:encode()
       local s = gather.c.socket
       s:write(data,gather.stun_ip,gather.stun_port)
@@ -634,14 +621,65 @@ local function gather_rto_timer(time,tid)
       end)
    end
 end
+local function gather_timer(time,sid)
+   local gather_que = local_streams[sid].gather_que
+   if gather_que:is_que_empty() then
+      return
+   end
+   local gather = gather_que:pop()
+   local tid = tx_id
+   gather_tx[tid] = {count=1,gather = gather}
+   tx_id = tx_id +1
+   local req = stun.new("request","binding",tx_id)
+   req.fingerprint = false
+   local data = req:encode()
+   local s = gather.c.socket
+   s:write(data,gather.stun_ip,gather.stun_port)
+   cell.timeout(time,function()
+		   gather_timer(time,sid)
+   end)
+   cell.timeout(time,function()
+		   gather_rto_timer(time,tid)
+   end)
+end
+
+
+local function start_gather()
+   local i
+   local stun = stun_servers[1] -- only one stun server in this version
+   for i=1 , #streams_info do
+      local stream = local_streams[i]
+      local que = new_que()
+      stream.gather_que = que
+      local locals = stream.locals
+      local j
+      for j=1,#locals do
+	 que:append({c=locals[i],stun_ip=stun.ip,stun_port=stun.port})
+      end
+      cell.timeout(0,function()
+		      gather_timer(ta,i)
+      end)
+   end
+end
+
 cell.command {
    start = function(...)
       role = ...
-      state = gather
+      state = "gather"
+      build_host()
       start_gather()
       start_ev = cell.event()
-      cell.wait(ev)
-      return local_streams
+      cell.wait(start_ev)
+      return true,local_streams
+   end,
+   set_remotes = function(...)
+      remote_streams = ...
+      assert(remote_streams)
+      assert(type(remote_streams) == "table")
+      set_remotes_ev = cell.event()
+      do_ice_handshake()
+      local ok,msg = cell.wait()
+      return ok,msg
    end,
    sleep = function(T)
       cell.sleep(T)
@@ -726,17 +764,6 @@ local function sort_checklist()
    end
 end
 
-
-local function compute_candidate_priority(t,cid)
-   local type_value = {
-      CANDIDATE_TYPE_HOST = 120,
-      CANDIDATE_TYPE_PEER_REFLEXIVE = 110,
-      CANDIDATE_TYPE_SERVER_REFLEXIVE = 100,
-      CANDIDATE_TYPE_RELAYED = 60
-   }
-   assert(type_value[t])
-   return bin.lshift(1,24) * type_value[t] + bin.lshift(1,8) * 1 + 1*(256-cid) 
-end
 
 
 local function do_send_check(pair,tid)
@@ -933,12 +960,6 @@ local function  do_ice_handshake()
    form_checklist()
 end
 cell.message {
-   set_remotes = function(...)
-      remote_streams = ...
-      assert(remote_streams)
-      assert(type(remote_streams) == "table")
-      do_ice_handshake()
-   end,
    send = function(sid,cid,msg,sz)
       local validlist = local_streams[sid].validlist
       local i 
@@ -990,5 +1011,7 @@ cell.message {
    end
 }
 function cell.main(...)
+   print(111)
    streams_info,stun_servers,opts = ...
+   return true
 end

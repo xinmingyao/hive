@@ -46,10 +46,9 @@ hashval = crc32.hash(val)
 --]]
 
 local string = require("string")
-local bit = require("bit")
+local bit = require("bit32")
 local tostring = tostring
-
-module('crc32')
+local crc32 = {}
 
 local CRC32 = {
     0x00000000, 0x77073096, 0xee0e612c, 0x990951ba, 
@@ -123,7 +122,7 @@ local lshift = bit.lshift
 local rshift = bit.rshift
 local band = bit.band
 
-function hash(str)
+function crc32.hash(str)
     str = tostring(str)
     local count = string.len(str)
     local crc = 2 ^ 32 - 1 
@@ -169,3 +168,4 @@ function hash_s(str)
 end
 --]]
 
+return crc32

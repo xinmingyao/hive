@@ -1,8 +1,8 @@
---local bin = require "cell.binlib"
-local crc32 = require('protocol.crc32')
+local bin = require "cell.binlib"
+local crc32 = require "protocol.crc32"
 local p2p_lib = require "p2p.p2p_lib"
 local bit  = require "bit32"
-local crypto = require("crypto")
+local crypto = require "crypto"
 local STUN_MARKER = 0
 local STUN_MAGIC_COOKIE = 0x2112A442
 local stun = {}
@@ -96,105 +96,113 @@ local function encode_attr_long(atype,num)
    return bin.pack(f.atype,len,num)
 end
 
+local f = {
+   MAPPED_ADDRESS = function(...) 
+      return 	 encode_attr_addr(0x0001) 
+   end,
+   AA = function(...) 
+     return  print(...)
+   end,
+}
 local encode_attr = {
-   ['MAPPED-ADDRESS'] = function(...) return  encode_attr_addr(0x0001,...) end,
-   ['RESPONSE-ADDRESS'] = function(...) return encode_attr_addr(0x0002,...) end,-- % Obsolete
-   ['CHANGE-REQUEST'] = function(...) return encode_change_req(0x0003,...) end,
-   ['SOURCE-ADDRESS'] = function(...) return  encode_attr_addr(0x0004,...) end,
-   ['CHANGED-ADDRESS'] = function(...) return  encode_attr_addr(0x0005,...) end,
-   ['USERNAME'] = function(...) return encode_attr_string(0x0006,...) end,
-   ['PASSWORD'] = function(...) return  encode_attr_string(0x0007,...) end,
-   ['MESSAGE-INTEGRITY'] = function(...) return encode_attr_string(0x0008,...) end,
-   ['ERROR-CODE'] = function(...) return  encode_attr_err(0x0009,...) end,
-   ['UNKNOWN-ATTRIBUTES'] = function(...) return  encode_attr_string(0x000a,...) end,
-   ['REFLECTED-FROM'] = function(...) return  encode_attr_string(0x000b,...) end,
-   ['CHANNEL-NUMBER'] = function(...) return encode_attr_int(0x000c,...) end,
-   ['LIFETIME'] = function(...) return  encode_attr_string(0x000d,...)   end,
-   ['ALTERNATE-SERVER'] = function(...) return encode_attr_addr(0x000e,...)   end,
-   ['MAGIC-COOKIE'] = function(...) return  encode_attr_string(0x000f,...) end,
-   ['BANDWIDTH'] = function(...) return  encode_attr_int(0x0010,...) end,
-   ['DESTINATION-ADDRESS'] = function(...) return  encode_attr_addr(0x0011,...) end,
-   ['XOR-PEER-ADDRESS'] = function(...) return encode_attr_xaddr(0x0012,...) end,
-   ['DATA'] = function(...) return  encode_attr_string(0x0013,...) end,
-   ['REALM'] = function(...) return encode_attr_string(0x0014,...) end,
-   ['NONCE'] = function(...) return  encode_attr_string(0x0015,...) end,
-   ['XOR-RELAYED-ADDRESS'] = function(...) return encode_attr_addr(0x0016,...) end,
-   ['REQUESTED-ADDRESS-TYPE'] = function(...) return  encode_attr_string(0x0017,...) end,
-   ['EVEN-PORT'] = function(...) return  encode_attr_string(0x0018,...) end,-- draft-ietf-behave-turn-10
-   ['REQUESTED-TRANSPORT'] = function(...) return  encode_attr_string(0x0019,...) end ,--}; % draft-ietf-behave-turn-10
-   ['DONT-FRAGMENT'] = function(...) return encode_attr_string(0x001a,...) end, --}; % draft-ietf-behave-turn-10
-   ['XOR-MAPPED-ADDRESS'] = function(...) return   encode_attr_addr(0x0020,...) end ,--};
-   ['RESERVATION-TOKEN'] = function(...) return  encode_attr_string(0x0022,...) end ,--}; % draft-ietf-behave-turn-10
-   ['PRIORITY'] = function(...) return  encode_attr_int(0x0024,...) end ,--}; % draft-ietf-mmusic-ice-19
-   ['USE-CANDIDATE'] = function(...) return  encode_attr_int(0x0025,...) end,--}; % draft-ietf-mmusic-ice-19
-   ['PADDING'] = function(...) return encode_attr_string(0x0026,...) end ,--}; % draft-ietf-behave-nat-behavior-discovery-03
-   ['RESPONSE-PORT'] = function(...) return  encode_attr_int(0x0027,...) end ,--};
-   ['XOR-REFLECTED-FROM'] = function(...) return encode_attr_addr(0x0028,...) end, --}; % draft-ietf-behave-nat-behavior-discovery-03
-   ['ICMP'] = function(...) return encode_attr_string(0x0030,...) end , --}; % Moved from TURN to a future I-D
-   ['X-VOVIDA-XOR-MAPPED-ADDRESS'] = function(...) return encode_attr_addr(0x8020,...) end, --}; % VOVIDA non-standart
-   ['X-VOVIDA-XOR-ONLY'] = function(...) return  encode_attr_string(0x8021,...) end,--}; % VOVIDA non-standart
-   ['SOFTWARE'] = function(...) return encode_attr_string(0x8022,...) end ,--}; % VOVIDA 'SERVER-NAME'
-   ['ALTERNATE-SERVER'] = function(...) return encode_attr_addr(0x8023,...) end,
-   ['CACHE_TIMEOUT'] = function(...) return encode_attr_string(0x8027,...) end, --}; % draft-ietf-behave-nat-behavior-discovery-03
---   ['FINGERPRINT'] = function(...) return encode_attr_string(0x8028,...) end,
-   ['ICE-CONTROLLED'] = function(...) return encode_attr_int(0x8029,...) end ,--}; % draft-ietf-mmusic-ice-19
-   ['ICE-CONTROLLING'] = function(...) return encode_attr_int(0x802a,...) end ,--}; % draft-ietf-mmusic-ice-19
-   ['RESPONSE-ORIGIN'] = function(...) return  encode_attr_addr(0x802b,...) end,
-   ['OTHER-ADDRESS'] = function(...) return encode_attr_addr(0x802c,...) end,
-   ['X-VOVIDA-SECONDARY-ADDRESS'] = function(...) return encode_attr_addr(0x8050,...) end,--}; % VOVIDA non-standart
-   ['CONNECTION-REQUEST-BINDING'] = function(...) return encode_attr_string(0xc001,...) end,
-   ['BINDING-CHANGE'] = function(...) return encode_attr_string(0xc002,...) end
+   MAPPED_ADDRESS = function(...) return  encode_attr_addr(0x0001,...) end,
+   RESPONSE_ADDRESS = function(...) return encode_attr_addr(0x0002,...) end,-- % Obsolete
+   CHANGE_REQUEST = function(...) return encode_change_req(0x0003,...) end,
+   SOURCE_ADDRESS = function(...) return  encode_attr_addr(0x0004,...) end,
+   CHANGED_ADDRESS = function(...) return  encode_attr_addr(0x0005,...) end,
+   USERNAME = function(...) return encode_attr_string(0x0006,...) end,
+   PASSWORD = function(...) return  encode_attr_string(0x0007,...) end,
+   MESSAGE_INTEGRITY = function(...) return encode_attr_string(0x0008,...) end,
+   ERROR_CODE = function(...) return  encode_attr_err(0x0009,...) end,
+   UNKNOWN_ATTRIBUTES = function(...) return  encode_attr_string(0x000a,...) end,
+   REFLECTED_FROM = function(...) return  encode_attr_string(0x000b,...) end,
+   CHANNEL_NUMBER = function(...) return encode_attr_int(0x000c,...) end,
+   LIFETIME = function(...) return  encode_attr_string(0x000d,...)   end,
+   ALTERNATE_SERVER = function(...) return encode_attr_addr(0x000e,...)   end,
+   MAGIC_COOKIE = function(...) return  encode_attr_string(0x000f,...) end,
+   BANDWIDTH = function(...) return  encode_attr_int(0x0010,...) end,
+   DESTINATION_ADDRESS = function(...) return  encode_attr_addr(0x0011,...) end,
+   XOR_PEER_ADDRESS = function(...) return encode_attr_xaddr(0x0012,...) end,
+   DATA = function(...) return  encode_attr_string(0x0013,...) end,
+   REALM = function(...) return encode_attr_string(0x0014,...) end,
+   NONCE = function(...) return  encode_attr_string(0x0015,...) end,
+   XOR_RELAYED_ADDRESS = function(...) return encode_attr_addr(0x0016,...) end,
+   REQUESTED_ADDRESS_TYPE = function(...) return  encode_attr_string(0x0017,...) end,
+   EVEN_PORT = function(...) return  encode_attr_string(0x0018,...) end,-- draft-ietf-behave-turn-10
+   REQUESTED_TRANSPORT = function(...) return  encode_attr_string(0x0019,...) end ,--}; % draft-ietf-behave-turn-10
+   DONT_FRAGMENT = function(...) return encode_attr_string(0x001a,...) end, --}; % draft-ietf-behave-turn-10
+   XOR_MAPPED_ADDRESS = function(...) return   encode_attr_addr(0x0020,...) end ,--};
+   RESERVATION_TOKEN = function(...) return  encode_attr_string(0x0022,...) end ,--}; % draft-ietf-behave-turn-10
+   PRIORITY = function(...) return  encode_attr_int(0x0024,...) end ,--}; % draft-ietf-mmusic-ice-19
+   USE_CANDIDATE = function(...) return  encode_attr_int(0x0025,...) end,--}; % draft-ietf-mmusic-ice-19
+   PADDING = function(...) return encode_attr_string(0x0026,...) end ,--}; % draft-ietf-behave-nat-behavior-discovery-03
+   RESPONSE_PORT = function(...) return  encode_attr_int(0x0027,...) end ,--};
+   XOR_REFLECTED_FROM = function(...) return encode_attr_addr(0x0028,...) end, --}; % draft-ietf-behave-nat-behavior-discovery-03
+   ICMP = function(...) return encode_attr_string(0x0030,...) end , --}; % Moved from TURN to a future I-D
+   X_VOVIDA_XOR_MAPPED_ADDRESS = function(...) return encode_attr_addr(0x8020,...) end, --}; % VOVIDA non-standart
+   X_VOVIDA_XOR_ONLY = function(...) return  encode_attr_string(0x8021,...) end,--}; % VOVIDA non-standart
+   SOFTWARE = function(...) return encode_attr_string(0x8022,...) end ,--}; % VOVIDA 'SERVER-NAME'
+   ALTERNATE_SERVER = function(...) return encode_attr_addr(0x8023,...) end,
+   CACHE_TIMEOUT = function(...) return encode_attr_string(0x8027,...) end, --}; % draft-ietf-behave-nat-behavior-discovery-03
+--   FINGERPRINT = function(...) return encode_attr_string(0x8028,...) end,
+   ICE_CONTROLLED = function(...) return encode_attr_int(0x8029,...) end ,--}; % draft-ietf-mmusic-ice-19
+   ICE_CONTROLLING = function(...) return encode_attr_int(0x802a,...) end ,--}; % draft-ietf-mmusic-ice-19
+   RESPONSE_ORIGIN = function(...) return  encode_attr_addr(0x802b,...) end,
+   OTHER_ADDRESS = function(...) return encode_attr_addr(0x802c,...) end,
+   X_VOVIDA_SECONDARY_ADDRESS = function(...) return encode_attr_addr(0x8050,...) end,--}; % VOVIDA non-standart
+   CONNECTION_REQUEST_BINDING = function(...) return encode_attr_string(0xc001,...) end,
+   BINDING_CHANGE = function(...) return encode_attr_string(0xc002,...) end
 }
 
-local decode_attr = {
-   [0x0001] = function(...) return 'MAPPED-ADDRESS', decode_attr_addr(...) end,
-   [0x0002] = function(...) return 'RESPONSE-ADDRESS', decode_attr_addr(...) end,-- % Obsolete
-   [0x0003] = function(...) return 'CHANGE-REQUEST', decode_change_req(...) end,
-   [0x0004] = function(...) return 'SOURCE-ADDRESS', decode_attr_addr(...) end,
-   [0x0005] = function(...) return 'CHANGED-ADDRESS', decode_attr_addr(...) end,
-   [0x0006] = function(...) return 'USERNAME', decode_attr_string(...) end,
-   [0x0007] = function(...) return 'PASSWORD', decode_attr_string(...) end,
-   [0x0008] = function(...) return 'MESSAGE-INTEGRITY',decode_attr_string(...) end,
-   [0x0009] = function(...) return 'ERROR-CODE', decode_attr_err(...) end,
-   [0x000a] = function(...) return 'UNKNOWN-ATTRIBUTES', decode_attr_string(...) end,
-   [0x000b] = function(...) return 'REFLECTED-FROM', decode_attr_string(...) end,
-   [0x000c] = function(...) return 'CHANNEL-NUMBER', decode_attr_int(...) end,
-   [0x000d] = function(...) return 'LIFETIME', decode_attr_string(...)   end,
-   [0x000e] = function(...) return 'ALTERNATE-SERVER', decode_attr_addr(...)   end,
-   [0x000f] = function(...) return 'MAGIC-COOKIE', decode_attr_string(...) end,
-   [0x0010] = function(...) return 'BANDWIDTH', decode_attr_int(...) end,
-   [0x0011] = function(...) return 'DESTINATION-ADDRESS', decode_attr_addr(...) end,
-   [0x0012] = function(...) return 'XOR-PEER-ADDRESS', decode_attr_xaddr(..., TID) end,
-   [0x0013] = function(...) return 'DATA', decode_attr_string(...) end,
-   [0x0014] = function(...) return 'REALM', decode_attr_string(...) end,
-   [0x0015] = function(...) return 'NONCE', decode_attr_string(...) end,
-   [0x0016] = function(...) return 'XOR-RELAYED-ADDRESS', decode_attr_xaddr(..., TID) end,
-   [0x0017] = function(...) return 'REQUESTED-ADDRESS-TYPE', decode_attr_string(...) end,
-   [0x0018] = function(...) return 'EVEN-PORT', decode_attr_string(...) end,-- draft-ietf-behave-turn-10
-   [0x0019] = function(...) return 'REQUESTED-TRANSPORT', decode_attr_string(...) end ,--}; % draft-ietf-behave-turn-10
-   [0x001a] = function(...) return 'DONT-FRAGMENT', decode_attr_string(...) end, --}; % draft-ietf-behave-turn-10
-   [0x0020] = function(...) return 'XOR-MAPPED-ADDRESS' , decode_attr_addr(...) end ,--};
-   [0x0022] = function(...) return 'RESERVATION-TOKEN', decode_attr_string(...) end ,--}; % draft-ietf-behave-turn-10
-   [0x0024] = function(...) return 'PRIORITY', decode_attr_int(...) end ,--}; % draft-ietf-mmusic-ice-19
-   [0x0025] = function(...) return 'USE-CANDIDATE', decode_attr_int(...) end,--}; % draft-ietf-mmusic-ice-19
-   [0x0026] = function(...) return 'PADDING', decode_attr_string(...) end ,--}; % draft-ietf-behave-nat-behavior-discovery-03
-   [0x0027] = function(...) return 'RESPONSE-PORT', decode_attr_int(...) end ,--};
-   [0x0028] = function(...) return 'XOR-REFLECTED-FROM', decode_attr_addr(...) end, --}; % draft-ietf-behave-nat-behavior-discovery-03
-   [0x0030] = function(...) return 'ICMP', decode_attr_string(...) end , --}; % Moved from TURN to a future I-D
-   [0x8020] = function(...) return 'X-VOVIDA-XOR-MAPPED-ADDRESS', decode_attr_addr(...) end, --}; % VOVIDA non-standart
-   [0x8021] = function(...) return 'X-VOVIDA-XOR-ONLY', decode_attr_string(...) end,--}; % VOVIDA non-standart
-   [0x8022] = function(...) return 'SOFTWARE', decode_attr_string(...) end ,--}; % VOVIDA 'SERVER-NAME'
-   [0x8023] = function(...) return 'ALTERNATE-SERVER', decode_attr_addr(...) end,
-   [0x8027] = function(...) return 'CACHE_TIMEOUT', decode_attr_string(...) end, --}; % draft-ietf-behave-nat-behavior-discovery-03
---   [0x8028] = function(...) return 'FINGERPRINT', decode_attr_string(...) end,
-   [0x8029] = function(...) return 'ICE-CONTROLLED', decode_attr_int(...) end ,--}; % draft-ietf-mmusic-ice-19
-   [0x802a] = function(...) return 'ICE-CONTROLLING', decode_attr_int(...) end ,--}; % draft-ietf-mmusic-ice-19
-   [0x802b] = function(...) return 'RESPONSE-ORIGIN', decode_attr_addr(...) end,
-   [0x802c] = function(...) return 'OTHER-ADDRESS', decode_attr_addr(...) end,
-   [0x8050] = function(...) return 'X-VOVIDA-SECONDARY-ADDRESS', decode_attr_addr(...) end,--}; % VOVIDA non-standart
-   [0xc001] = function(...) return 'CONNECTION-REQUEST-BINDING', decode_attr_string(...) end,
-   [0xc002] = function(...) return 'BINDING-CHANGE', decode_attr_string(...) end
-}
+local decode_attr = {}
+decode_attr[0x0001] = function(...) return 'MAPPED-ADDRESS', decode_attr_addr(...) end
+decode_attr[0x0002] = function(...) return 'RESPONSE-ADDRESS', decode_attr_addr(...) end-- % Obsolete
+decode_attr[0x0003] = function(...) return 'CHANGE-REQUEST', decode_change_req(...) end
+decode_attr[0x0004] = function(...) return 'SOURCE-ADDRESS', decode_attr_addr(...) end
+decode_attr[0x0005] = function(...) return 'CHANGED-ADDRESS', decode_attr_addr(...) end
+decode_attr[0x0006] = function(...) return 'USERNAME', decode_attr_string(...) end
+decode_attr[0x0007] = function(...) return 'PASSWORD', decode_attr_string(...) end
+decode_attr[0x0008] = function(...) return 'MESSAGE-INTEGRITY',decode_attr_string(...) end
+decode_attr[0x0009] = function(...) return 'ERROR-CODE', decode_attr_err(...) end
+decode_attr[0x000a] = function(...) return 'UNKNOWN-ATTRIBUTES', decode_attr_string(...) end
+decode_attr[0x000b] = function(...) return 'REFLECTED-FROM', decode_attr_string(...) end
+decode_attr[0x000c] = function(...) return 'CHANNEL-NUMBER', decode_attr_int(...) end
+decode_attr[0x000d] = function(...) return 'LIFETIME', decode_attr_string(...)   end
+decode_attr[0x000e] = function(...) return 'ALTERNATE-SERVER', decode_attr_addr(...)   end
+decode_attr[0x000f] = function(...) return 'MAGIC-COOKIE', decode_attr_string(...) end
+decode_attr[0x0010] = function(...) return 'BANDWIDTH', decode_attr_int(...) end
+decode_attr[0x0011] = function(...) return 'DESTINATION-ADDRESS', decode_attr_addr(...) end
+decode_attr[0x0012] = function(...) return 'XOR-PEER-ADDRESS', decode_attr_xaddr(..., TID) end
+decode_attr[0x0013] = function(...) return 'DATA', decode_attr_string(...) end
+decode_attr[0x0014] = function(...) return 'REALM', decode_attr_string(...) end
+decode_attr[0x0015] = function(...) return 'NONCE', decode_attr_string(...) end
+decode_attr[0x0016] = function(...) return 'XOR-RELAYED-ADDRESS', decode_attr_xaddr(..., TID) end
+decode_attr[0x0017] = function(...) return 'REQUESTED-ADDRESS-TYPE', decode_attr_string(...) end
+decode_attr[0x0018] = function(...) return 'EVEN-PORT', decode_attr_string(...) end-- draft-ietf-behave-turn-10
+decode_attr[0x0019] = function(...) return 'REQUESTED-TRANSPORT', decode_attr_string(...) end --}; % draft-ietf-behave-turn-10
+decode_attr[0x001a] = function(...) return 'DONT-FRAGMENT', decode_attr_string(...) end --}; % draft-ietf-behave-turn-10
+decode_attr[0x0020] = function(...) return 'XOR-MAPPED-ADDRESS' , decode_attr_addr(...) end --};
+decode_attr[0x0022] = function(...) return 'RESERVATION-TOKEN', decode_attr_string(...) end --}; % draft-ietf-behave-turn-10
+decode_attr[0x0024] = function(...) return 'PRIORITY', decode_attr_int(...) end --}; % draft-ietf-mmusic-ice-19
+decode_attr[0x0025] = function(...) return 'USE-CANDIDATE', decode_attr_int(...) end--}; % draft-ietf-mmusic-ice-19
+decode_attr[0x0026] = function(...) return 'PADDING', decode_attr_string(...) end --}; % draft-ietf-behave-nat-behavior-discovery-03
+decode_attr[0x0027] = function(...) return 'RESPONSE-PORT', decode_attr_int(...) end --};
+decode_attr[0x0028] = function(...) return 'XOR-REFLECTED-FROM', decode_attr_addr(...) end --}; % draft-ietf-behave-nat-behavior-discovery-03
+decode_attr[0x0030] = function(...) return 'ICMP', decode_attr_string(...) end  --}; % Moved from TURN to a future I-D
+decode_attr[0x8020] = function(...) return 'X-VOVIDA-XOR-MAPPED-ADDRESS', decode_attr_addr(...) end --}; % VOVIDA non-standart
+decode_attr[0x8021] = function(...) return 'X-VOVIDA-XOR-ONLY', decode_attr_string(...) end--}; % VOVIDA non-standart
+decode_attr[0x8022] = function(...) return 'SOFTWARE', decode_attr_string(...) end --}; % VOVIDA 'SERVER-NAME'
+decode_attr[0x8023] = function(...) return 'ALTERNATE-SERVER', decode_attr_addr(...) end
+decode_attr[0x8027] = function(...) return 'CACHE_TIMEOUT', decode_attr_string(...) end --}; % draft-ietf-behave-nat-behavior-discovery-03
+--   decode_attr[0x8028] = function(...) return 'FINGERPRINT', decode_attr_string(...) end,
+decode_attr[0x8029] = function(...) return 'ICE-CONTROLLED', decode_attr_int(...) end --}; % draft-ietf-mmusic-ice-19
+decode_attr[0x802a] = function(...) return 'ICE-CONTROLLING', decode_attr_int(...) end --}; % draft-ietf-mmusic-ice-19
+decode_attr[0x802b] = function(...) return 'RESPONSE-ORIGIN', decode_attr_addr(...) end
+decode_attr[0x802c] = function(...) return 'OTHER-ADDRESS', decode_attr_addr(...) end
+decode_attr[0x8050] = function(...) return 'X-VOVIDA-SECONDARY-ADDRESS', decode_attr_addr(...) end--}; % VOVIDA non-standart
+decode_attr[0xc001] = function(...) return 'CONNECTION-REQUEST-BINDING', decode_attr_string(...) end
+decode_attr[0xc002] = function(...) return 'BINDING-CHANGE', decode_attr_string(...) end
+
 
 function stun_meta:encode()
    local req = self
@@ -203,17 +211,37 @@ function stun_meta:encode()
    local attrs = req.attrs
    local k,v,data
    data = ""
-   for k,v in attrs do
+   for k,v in pairs(attrs) do
       if encode_attr[k] then
 	 data = data .. encode_attr[k](v)
       end
    end
-   local bin
-   assert(req.class and req.method)
-   local c,m = req.class,req.method
-   
 
-   -- h[0] = (c>>1) | ((m>>6)&0x3e)
+   assert(req.class and req.method)
+   local c1,m1 = req.class,req.method
+   
+   local str2method = {
+      binding = 0x001 ,
+      shared_secret = 0x002 ,
+      allocate = 0x003,
+      refresh = 0x004 ,
+      connect = 0x005  ,
+      send = 0x006  ,
+      data = 0x007 ,
+      createpermission = 0x008 ,
+      channelbind = 0x009
+   }
+   local str2class = {
+      request = 0 ,
+      indication = 1  ,
+      response = 2 ,
+      error = 3 
+   }
+   
+   c = str2class[c1]
+   m = str2method[m1]
+   
+   -- hdecode_attr[0] = (c>>1) | ((m>>6)&0x3e)
    -- h[1] = ((c<<4) & 0x10) | ((m<<1)&0xe0) | (m&0x0f)
    local s1 = bit.band(bit.bor(bit.rshift(c,1),bit.rshift(m,6)),0x3e)
    local s2 = bit.bor(
@@ -236,8 +264,8 @@ function stun_meta:encode()
    if req.fingerprint then
       len = len + 8 
       data = bin.pack(">SSA",s_type,len,data)
-      local crc = bit32.bxor(crc32.hash(data),0x5354554e)      
-      data = bin.pack(">ACCCCI",s_type,len,data,0x80,0x28,0x0,ox4,crc)
+      local crc = bit32.bxor(crc32.hash(data),0x5354554e)         
+      data = bin.pack(">ACCCCI",data,0x80,0x28,0x00,0x04,crc)
    end
    
    return data
@@ -311,17 +339,17 @@ function stun.decode(data,sz,key)
    local b5 = bit.brshift(bit.band(s_type,0x0010),4)
    local class = bit.bor(b4,b5)
    
-   local method2str = {
-      [0x001] = "binding",
-      [0x002] = "shared_secret",
-      [0x003] = "allocate",
-      [0x004] = "refresh",
-      [0x005] = "connect",
-      [0x006] = "send",
-      [0x007] = "data",
-      [0x008] = "createpermission",
-      [0x009] = "channelbind"
-   }
+   local method2str = {}
+   method2str[0x001] = "binding"
+   method2str[0x002] = "shared_secret"
+   method2str[0x003] = "allocate"
+   method2str[0x004] = "refresh"
+   method2str[0x005] = "connect"
+   method2str[0x006] = "send"
+   method2str[0x007] = "data"
+   method2str[0x008] = "createpermission"
+   method2str[0x009] = "channelbind"
+      
    rep.method =  method2str[method]
    local class2str = {
       [0] = "request",

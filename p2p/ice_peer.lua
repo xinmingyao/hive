@@ -4,16 +4,17 @@ local math = require "math"
 local srtp = require "lua_srtp"
 local peer = {}
 local peer_meta  = {}
+
 function peer_meta:offer()   
-   cell.call(self.pid,start,"controlling")
+   return cell.call(self.pid,"start","controlling")
 end
 
-function peer_meta:answer()
-   cell.call(self.pid,start,"controlled")
+function peer_meta:answer(remote_info)
+   return cell.call(self.pid,"start","controlled")
 end
 
 function peer_meta:set_remotes(...)
-   cell.send(self.pid,set_remotes,...)
+   cell.call(self.pid,set_remotes,...)
 end
 
 function peer_meta:send(sid,cid,msg,sz)
@@ -32,7 +33,7 @@ function peer_meta:receive(agent,sid,cid,msg,sz)
    if self.dtls then
       msg,sz,ssrc,ts,seq = srtp.unpack(msg,sz)
    end
-   local f =  cell.message["receive"]
+   local f =  cell.get_message("receive")
    assert(f)
    f(sid,cid,msg,sz,ts,seq)
 end
@@ -52,10 +53,11 @@ function peer.new(streams_info,stun_servers,opts)
       p.seq = 1
       p.ssrc = ssrc
    end
-   cell.message["ice_receive"] = peer_meta.receive
+   cell.add_message("ice_receive",peer_meta.receive)
    assert(peer_meta.receive)
    local pid = cell.cmd("launch", "p2p.ice_agent_full",streams_info,stun_servers,opts)
    p.pid = pid
    return setmetatable(p,{__index = peer_meta})
 end
 return peer
+

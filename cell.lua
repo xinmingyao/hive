@@ -161,7 +161,12 @@ end
 function cell.message(msgfuncs)
 	message = msgfuncs
 end
-
+function cell.add_message(k,v)
+   message[k] = v
+end
+function cell.get_message(k)
+   return message[k]
+end
 function cell.gui(cmdfuncs)
 	gui = cmdfuncs
 end
