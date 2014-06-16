@@ -18,7 +18,7 @@ function stun.new(c,m,t,a)
 	      tx_id = t,
 	      integrity = false,
 	      key = nil,
-	      fingerprint = true,
+	      fingerprint = false,
 	      attrs = a
    }
    return setmetatable(s,{__index = stun_meta})
@@ -27,6 +27,22 @@ end
 function stun_meta:add_attr(k,v)
    self.attrs[k] = v
 end
+
+function stun_meta:get_addr_value(k)
+   return self.attrs[k]
+end
+
+local function  decode_attr_xaddr(data,len,sz,pos)
+   assert(len==8)
+   local v = {}
+   local pos1
+   pos1,v.type,v.family,v.port,v.ip = bin.unpack(">CCSI",data,sz,pos)
+   v.port = bit.bxor(v.port,bit.rshift(STUN_MAGIC_COOKIE,16))
+   v.ip = bit.bxor(v.ip,STUN_MAGIC_COOKIE)
+   v.ip = p2p_lib.fromdword(v.ip)
+   return pos1,v
+end
+
 local function  decode_attr_addr(data,len,sz,pos)
    assert(len==8)
    local v = {}
@@ -86,7 +102,7 @@ local function encode_attr_int(atype,num)
    assert(type(num)=="number")
    local f = ">SSI"
    local len = 4
-   return bin.pack(f.atype,len,num)
+   return bin.pack(f,atype,len,num)
 end
 
 local function encode_attr_long(atype,num)
@@ -181,7 +197,7 @@ decode_attr[0x0017] = function(...) return 'REQUESTED-ADDRESS-TYPE', decode_attr
 decode_attr[0x0018] = function(...) return 'EVEN-PORT', decode_attr_string(...) end-- draft-ietf-behave-turn-10
 decode_attr[0x0019] = function(...) return 'REQUESTED-TRANSPORT', decode_attr_string(...) end --}; % draft-ietf-behave-turn-10
 decode_attr[0x001a] = function(...) return 'DONT-FRAGMENT', decode_attr_string(...) end --}; % draft-ietf-behave-turn-10
-decode_attr[0x0020] = function(...) return 'XOR-MAPPED-ADDRESS' , decode_attr_addr(...) end --};
+decode_attr[0x0020] = function(...) return 'XOR-MAPPED-ADDRESS' , decode_attr_xaddr(...) end --};
 decode_attr[0x0022] = function(...) return 'RESERVATION-TOKEN', decode_attr_string(...) end --}; % draft-ietf-behave-turn-10
 decode_attr[0x0024] = function(...) return 'PRIORITY', decode_attr_int(...) end --}; % draft-ietf-mmusic-ice-19
 decode_attr[0x0025] = function(...) return 'USE-CANDIDATE', decode_attr_int(...) end--}; % draft-ietf-mmusic-ice-19
@@ -216,7 +232,6 @@ function stun_meta:encode()
 	 data = data .. encode_attr[k](v)
       end
    end
-
    assert(req.class and req.method)
    local c1,m1 = req.class,req.method
    
@@ -243,6 +258,7 @@ function stun_meta:encode()
    
    -- hdecode_attr[0] = (c>>1) | ((m>>6)&0x3e)
    -- h[1] = ((c<<4) & 0x10) | ((m<<1)&0xe0) | (m&0x0f)
+   assert(c and m)
    local s1 = bit.band(bit.bor(bit.rshift(c,1),bit.rshift(m,6)),0x3e)
    local s2 = bit.bor(
       bit.band(bit.lshift(c,4),0x10),
@@ -266,18 +282,21 @@ function stun_meta:encode()
       data = bin.pack(">SSA",s_type,len,data)
       local crc = bit32.bxor(crc32.hash(data),0x5354554e)         
       data = bin.pack(">ACCCCI",data,0x80,0x28,0x00,0x04,crc)
+   else
+      data = bin.pack(">SSA",s_type,len,data)
    end
    
    return data
 end
 function stun.decode(data,sz,key)
-   local rep = stun.new()
-   local len  = sz - 8 
-   local f = ">SSA" .. size..">CCCCI"
-   local pos,data
+   local req = stun.new()
+   local len  = sz - 8
+   --local f = ">SSA" .. len..">CCCCI"
+   local pos,d1
    --check finger print
    if sz > 20 + 8 then
-      local pos,d1,c1,c2,c3,c4,crc= bin.unpack(">A"..len,data,sz)
+      local d1,c1,c2,c3,c4,crc
+      pos,d1,c1,c2,c3,c4,crc= bin.unpack(">A"..len,data,sz)
       if c1 == 0x080 and c1 == 0x28 and c3 == 0x0 and c4 == 0x04 then
 	 local crc1 = bit32.bxor(crc32.hash(msg),0x5354554e)
 	 if crc1 ~= crc then
@@ -315,7 +334,7 @@ function stun.decode(data,sz,key)
       end
 
    end
-   local pos,s_type,len,magic_cookie,tmp,tx_id,data = bin.unpack(">SSIILA"..(len-16),data)
+   local pos,s_type,len,magic_cookie,tmp,tx_id,data_attrs = bin.unpack(">SSIILA"..(len-16),data,sz)
    if req.fingerprint then
       len = len - 8
    end
@@ -330,13 +349,13 @@ function stun.decode(data,sz,key)
    --libnice stunmessage
    --(((t&0x3e00)>>2) | ((t&0x00e0)>>1) | (t&0x000f))
    local s_type1 = s_type
-   local b1 =  bit.brshift(bit.band(s_type1,0x3e00),2)  
-   local b2 =  bit.brshift(bit.band(s_type1,0x00e0),1)  
+   local b1 =  bit.rshift(bit.band(s_type1,0x3e00),2)  
+   local b2 =  bit.rshift(bit.band(s_type1,0x00e0),1)  
    local b3 = bit.band(s_type,0x000f)
    local method = bit.bor(b1,b2,b3)
    --(((t&0x0100)>>7)|((t&0x0010)>>4))
-   local b4 = bit.brshift(bit.band(s_type,0x0100),7)
-   local b5 = bit.brshift(bit.band(s_type,0x0010),4)
+   local b4 = bit.rshift(bit.band(s_type,0x0100),7)
+   local b5 = bit.rshift(bit.band(s_type,0x0010),4)
    local class = bit.bor(b4,b5)
    
    local method2str = {}
@@ -350,33 +369,34 @@ function stun.decode(data,sz,key)
    method2str[0x008] = "createpermission"
    method2str[0x009] = "channelbind"
       
-   rep.method =  method2str[method]
+   req.method =  method2str[method]
    local class2str = {
       [0] = "request",
       [1] = "indication",
       [2] = "response",
       [3] = "error"
    }
-   rep.class = class2str[class]
-   rep.tx_id = tx_id
+   req.class = class2str[class]
+   req.tx_id = tx_id
    
-   pos = 0 
-   while pos < len do
+   pos = 21
+   while pos < len + 20  do
       local t,type_len,tt
       pos,t,type_len= bin.unpack(">SS",data,sz,pos)      
       local f = decode_attr[t]
       if f ~= nil then
-	 pos,key,value = f(data,type_len,sz,pos)
-	 rep.attrs[key] = value
+	 key,pos,value = f(data,type_len,sz,pos)
+	 req.attrs[key] = value
       else
-	 pos,tt = bin.unpack(">A"..type_len)
-	 rep.attrs[t] = tt
+	 pos,tt = bin.unpack(">A"..type_len,pos)
+	 req.attrs[t] = tt
 	 print("warning unknow type:",t)
       end
-      sz = sz - 4 - type_len
-      len = len - 4 - type_len
+
+     -- sz = sz - 4 - type_len
+     -- len = len - 4 - type_len
    end
-      return rep
+   return true,req
 end
 
 function stun.stun_test1()

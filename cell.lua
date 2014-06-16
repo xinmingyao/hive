@@ -18,6 +18,7 @@ mt.__newindex=function(t,k,v)
 end 
 setmetatable(_G,mt) 
 ]]
+
 local ssl = require("ssl")
 
 local c = require "cell.c"
@@ -502,7 +503,6 @@ cell.dispatch {
 
 		local udp = sockets_udp[fd]
 		if udp then
-		   print(":::::::udp")
 		   local ssl_s = socket_ssl[fd]
 		   if msg == nil then --ssl event
 		      assert(ssl_s,"must for ssl")		      

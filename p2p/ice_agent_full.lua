@@ -30,6 +30,19 @@ local max_count = 3 -- max timeout
 local que_meta = {} 
 
 
+local function get_pair_by_id(sid,pair_id)
+   local pairs = local_streams[sid].checklist
+   local i
+   for i=1,#pairs do
+      if pair_id == pairs[i].id then
+	 return pairs[i]
+      end
+   end
+   assert(false,"should not happen!")
+end
+
+
+
 local function compute_candidate_priority(t,cid)
    local type_value = {
       CANDIDATE_TYPE_HOST = 120,
@@ -94,14 +107,19 @@ function que_meta:pop()
 end
 
 local function deep_copy(src,dst)
+   
+   local mt = getmetatable(dst)
+   if mt then
+      setmetatable(src,mt)
+   end
    local k,v
    for k,v in pairs(dst) do
       if type(v) == "table" then
 	 local v1 = {}
 	 deep_copy(v1,v)
-	 src.k = v1
+	 src[k] = v1
       else
-	 src.k = v
+	 src[k] = v
       end
    end
    local i
@@ -214,12 +232,13 @@ local function do_gather(req)
 		 cid = host.cid,
 		 sid = host.sid,
 		 user = host.user,
-		 priority = compute_candidate_priority("CANDIDATE_TYPE_SERVER_REFLEXIVE",c.cid),
+		 priority = compute_candidate_priority("CANDIDATE_TYPE_SERVER_REFLEXIVE",host.cid),
 		 pwd = host.pwd,
 		 stun_ip = gather.stun_ip,
 		 stun_port = gather.stun_port
       }	       
-      table.insert(local_streams[sid].locals,c)
+ --     print(ip,port)
+      table.insert(local_streams[host.sid].locals,c)
       gather_tx[req.tx_id] = nil
       is_gather_complete()
    end
@@ -257,10 +276,10 @@ local function regula_nominate_timer(time,sid)
       check_tx[tid] = {sid=sid,index= index,count=1}
       pair.is_nominate = true
       do_send_check(pair,tid)
-      cell.timer(ta,function()
+      cell.timeout(ta,function()
 		    regula_nominate_timer(time,sid)
       end)
-      cell.timer(ta,function()
+      cell.timeout(ta,function()
 		    nominate_rto_timer(ta,tid)
       end)
    end
@@ -281,7 +300,7 @@ local function start_regula_nominate(sid)
       for i = 1,#validlist do
 	 que:append(i)
       end
-      cell.timer(0,function()
+      cell.timeout(0,function()
 		    regula_nominate_timer(ta,sid)
       end)
    end
@@ -324,7 +343,7 @@ local function is_agent_succeed()
       local i
       for i =1 ,#local_streams do
 	 if local_streams[i].checklist_state == "CHECKLIST_COMPLETED" then --not for failed component
-	    local validlist = local_streams[i]
+	    local validlist = local_streams[i].validlist
 	    local j
 	    for j=1,#validlist do
 	       local pair = validlist[j]
@@ -345,7 +364,7 @@ local function is_agent_succeed()
 		  pair.ssl = ssl_socket
 	       else
 		  print("error:",ssl_socket)
-		  cell.wakeup(set_remotes,false,"dtls_error")
+		  cell.wakeup(set_remotes_ev,false,"dtls_error")
 		  --cell.send(opts.client,agent_fail,"dtls_error",ssl_socket)
 	       end
 	    end
@@ -353,12 +372,17 @@ local function is_agent_succeed()
       end
    end
    state = "completed"
-   cell.wakeup(set_remotes,true,state)
+   cell.wakeup(set_remotes_ev,true,state)
    return
 end
 
 
 local function do_running(req,fd,peer_ip,peer_port)
+      if not set_remotes_ev then 
+	 --flush the message
+	 return 
+      end
+
    if req.class =="error" then
       local tid = req.tx_id
       local tx = check_tx[tid]
@@ -381,7 +405,7 @@ local function do_running(req,fd,peer_ip,peer_port)
       pair.state = "PAIR_WAITING"
       trigger_que:append({sid=tx.sid,pair_id=tx.pair_id})
       return 
-   elseif req.class =="success" then
+   elseif req.class =="response" then
       local tid = req.tx_id
       local tx = check_tx[tid]
       if not tx then
@@ -474,12 +498,13 @@ local function do_running(req,fd,peer_ip,peer_port)
 	 sort_checklist()
       end
       
-      local rep = stun.new('success','binding',req.tx_id)
+      local rep = stun.new('response','binding',req.tx_id)
       local priority = req:get_addr_value('PRIORITY',priority)
       rep:add_attr('XOR-PEER-ADDRESS',{ip=peer_ip,port=peer_port})
       rep:add_attr('PRIORITY',priority)
       local data = rep:encode()
       socket:write(data,peer_ip,peer_port)
+      print(string.len(data))
       -- find peer flex
       local i 
       local new_remote = true
@@ -577,6 +602,8 @@ local function build_host()
       local_streams[i] = {}
       local_streams[i].sid = stream.sid
       local_streams[i].locals = {}
+      local_streams[i].trigger_que = new_que()
+      local_streams[i].validlist = {}
       for j=1, #(cps) do
 	 local c = cps[j]
 	 local socket = cell.open(c.port,cell.self)
@@ -662,30 +689,6 @@ local function start_gather()
    end
 end
 
-cell.command {
-   start = function(...)
-      role = ...
-      state = "gather"
-      build_host()
-      start_gather()
-      start_ev = cell.event()
-      cell.wait(start_ev)
-      return true,local_streams
-   end,
-   set_remotes = function(...)
-      remote_streams = ...
-      assert(remote_streams)
-      assert(type(remote_streams) == "table")
-      set_remotes_ev = cell.event()
-      do_ice_handshake()
-      local ok,msg = cell.wait()
-      return ok,msg
-   end,
-   sleep = function(T)
-      cell.sleep(T)
-      return true
-   end
-}
 local gatherF = function(...)
    if states["gather"] then
 	 states["gather"](...)
@@ -696,7 +699,8 @@ local function build_pair()
    local i
    for i=1,#local_streams do
       stream = local_streams[i]
-      stream.checklist = {state="CHECKLIST_RUNNING"}
+      stream.checklist_state = "CHECKLIST_RUNNING"
+      stream.checklist = {}
       local l2 = {}
       deep_copy(l2,stream.locals)
       local j=1
@@ -706,8 +710,10 @@ local function build_pair()
 	    table.remove(l2,j)
 	    j = j-1
 	 end
+	 j = j +1 
       end
       
+
       for j=1,#l2 do
 	 local k
 	 local c1 = l2[j]
@@ -784,7 +790,7 @@ local function do_send_check(pair,tid)
    end
    local data = req:encode()
    local socket = pair.l.socket
-   socket:write(data,pair.r.addr.ip,pair.r.add.port)
+   socket:write(data,pair.r.addr.ip,pair.r.addr.port)
 end
 
 local function trigger_check(sid)
@@ -793,17 +799,12 @@ local function trigger_check(sid)
    local sid = trigger.sid
    local pair_id = trigger.pair_id
    local tid = get_txid()
-   check_tx[tid] = {count=1,sid=sid,pair_id=p1.id}
+   check_tx[tid] = {count=1,sid=sid,pair_id=pair_id}
    local pair = get_pair_by_id(sid,pair_id)
    do_send_check(pair,tx_id)
    pair.state = "PAIR_IN_PROGRESS"
-   cell.timer(ta,function()
-		 check_timer(ta,sid)
-   end)
-   cell.timer(ta,function()
-		 check_rto_timer(ta,tid)
-   end)
-
+   return tid
+   
 end
 
 local function order_check(sid)
@@ -827,35 +828,18 @@ local function order_check(sid)
 		    return false
 		 end
    end)
-
    local pair = checklist[1]
    if pair.state == "PAIR_WAITING" or pair.state == "PAIR_FROZEN" then
       local tid = get_txid()
-      check_tx[tid] = {count=1,sid=sid,pair_id=p1.id}
+      check_tx[tid] = {count=1,sid=sid,pair_id=pair.id}
       do_send_check(pair,tid)
       pair.state = "PAIR_IN_PROGRESS"
-      cell.timer(ta,function()
-		    check_timer(ta,sid)
-      end)
-      cell.timer(ta,function()
-		 check_rto_timer(ta,tid)
-      end)
+      return tid
    end
    
 end
 
 
-
-local function get_pair_by_id(sid,pair_id)
-   local pairs = local_streams[sid].checklist
-   local i
-   for i=1,#pairs do
-      if pair_id == pairs[i].id then
-	 return pairs[i]
-      end
-   end
-   assert(false,"should not happen!")
-end
 
 local function update_checklist_state(sid)
    local checklist = local_streams[sid].checklist
@@ -868,7 +852,7 @@ local function update_checklist_state(sid)
       end
    end
    
-   local componets = streams_info.components
+   local componets = streams_info[sid].components
    local tmp = {}
    for i = 1,#componets do
       local cid = componets[i].cid
@@ -900,7 +884,7 @@ local function check_rto_timer(time,txid)
       update_checklist_state(tx.sid)
       --when first media failed,start other fix me
       if tx.sid == 1 then
-	 if local_streams[sid].checklist_state == "CHECKLIST_FAILED" then
+	 if local_streams[tx.sid].checklist_state == "CHECKLIST_FAILED" then
 	    local j 
 	    for j=2,#local_streams do
 	       start_check(j)
@@ -908,7 +892,7 @@ local function check_rto_timer(time,txid)
 	 end
       end
    else      
-      do_send_check(pair,tx.tx_id)
+      do_send_check(pair,txid)
       tx.count = count +1
       cell.timeout(time,function()
 		      check_rto_timer(time,txid)
@@ -916,18 +900,26 @@ local function check_rto_timer(time,txid)
    end
 end
 
+
 local function check_timer(time,sid)
    assert(sid)
    local stream = local_streams[sid]
-   if trigger_que:is_que_empty() then
-      order_check(sid)
+   local que = stream.trigger_que
+   local tid 
+   if que:is_que_empty() then
+      tid = order_check(sid)
    else
-      trigger_check(sid)
+      tid =trigger_check(sid)
    end
---  cell.timeout(time,function()
---		   check_timer(time,sid)
---   end)
+  cell.timeout(time,function()
+		  check_timer(time,sid)
+  end)
 
+  if tid then
+     cell.timeout(ta,function()
+		     check_rto_timer(ta,tid)
+     end)
+  end
 end
 
 local function is_checklist_frozen(sid)
@@ -983,7 +975,7 @@ cell.message {
       --todo peek msg
       local pos,b1 = bin.unpack(">C",msg,sz)
       if b1 == 0x16 then --dtls
-      elseif bin:rshif(b1,6) == 0x0 then
+      elseif bit.rshift(b1,6) == 0x0 then
 	 local ok,req = stun.decode(msg,sz)
 	 if states[state] then
 	    states[state](req,fd,peer_ip,peer_port)
@@ -1006,12 +998,37 @@ cell.message {
 	    assert(srtp)
 	    sz = lua_srtp.protected(srtp,msg,sz)
 	 end
-	 cell.send(opts.client,ice_receive,cell.self,sid,cid,msg,sz)
+	 cell.send(opts.client,"ice_receive",cell.self,sid,cid,msg,sz)
       end
    end
 }
+
+
+cell.command {
+   start = function(...)
+      role = ...
+      state = "gather"
+      build_host()
+      start_gather()
+      start_ev = cell.event()
+      cell.wait(start_ev)
+      return true,local_streams
+   end,
+   set_remotes = function(...)
+      remote_streams = ...
+      assert(remote_streams)
+      assert(type(remote_streams) == "table")
+      set_remotes_ev = cell.event()
+      do_ice_handshake()
+      local ok,msg = cell.wait()
+      return ok,msg
+   end,
+   sleep = function(T)
+      cell.sleep(T)
+      return true
+   end
+}
 function cell.main(...)
-   print(111)
    streams_info,stun_servers,opts = ...
    return true
 end

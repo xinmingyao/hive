@@ -13,7 +13,7 @@ cell.command {
 	      return true
 	end,
 	set_remotes = function(...)
-	   return peer:set_remotes(...)
+	   return peer:set_remotes(Remotes)
 	end,
 	ping = function(Remotes)
 	   peer:send(sid,cid,"ping")
@@ -28,18 +28,18 @@ cell.message {
    end
 }
 
-function cell.main(port)
+function cell.main(port,remotes)
    
    if not port  then
       port = 9000
    end
-   print("client start:",port)
+   print("server start:",port)
    local streams_info =
       {
 	 {sid=1,
 	  components = {
 	     {
-		cid=1,user="client",pwd="pwd1",port=port,ip="192.168.203.157"
+		cid=1,user="server",pwd="server",port=port,ip="192.168.203.157"
 	     }
 	  }
 	 }
@@ -50,6 +50,9 @@ function cell.main(port)
       }
    local opts = {}
    peer = ice_peer.new(streams_info,stun_servers,opts)
-   local ok,info = peer:offer()
+   local ok,info = peer:answer()
+   cell.timeout(0,function()
+		   peer:set_remotes(remotes)
+   end)
    return ok,info
 end

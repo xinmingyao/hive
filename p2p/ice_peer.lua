@@ -14,7 +14,7 @@ function peer_meta:answer(remote_info)
 end
 
 function peer_meta:set_remotes(...)
-   cell.call(self.pid,set_remotes,...)
+   cell.call(self.pid,"set_remotes",...)
 end
 
 function peer_meta:send(sid,cid,msg,sz)
