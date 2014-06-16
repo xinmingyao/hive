@@ -225,11 +225,11 @@ function stun_meta:encode()
    assert(req and type(req)=="table")
    assert(type(req.tx_id) == "number")
    local attrs = req.attrs
-   local k,v,data
-   data = ""
+   local k,v,attrs
+   attrs = ""
    for k,v in pairs(attrs) do
       if encode_attr[k] then
-	 data = data .. encode_attr[k](v)
+	 attrs = attrs .. encode_attr[k](v)
       end
    end
    assert(req.class and req.method)
@@ -265,45 +265,49 @@ function stun_meta:encode()
       bit.band(bit.lshift(m,1),0xe0),
       bit.band(m,0x0f))
    local s_type = bit.bor(bit.lshift(s1,8),s2)
-   local len = string.len(data)
+   local len = string.len(attrs)
    local f = ">IILA" 
    -- txid must long ,and 4 byte 0 + txid = 96 bit transactionid
-   data = bin.pack(f,STUN_MAGIC_COOKIE,0,req.tx_id,data)
+   -- attrs = bin.pack(f,STUN_MAGIC_COOKIE,0,req.tx_id,data)
   
+   local integrity_data = ""
    if req.integrity and req.key then
       len = len + 24 
-      data = bin.pack(">SSA",s_type,len,data)
-      local finger = crypto:sha_mac(req.key,data)
-      data = bin.pack(">SSACCCCA",s_type,len,data,0x0,0x8,0x0,0x14,finger)
+      local data1 = bin.pack(">SSIILA",s_type,len,STUN_MAGIC_COOKIE,0,req.tx_id,attrs)
+      local integrity = crypto:hmac("sha1",data1,req.key)
+      assert(#finger ==20)
+      integrity_data = bin.pack("SSA",0x0008,20,integrity)
    end
-
+   
+   attrs = attrs..integrity_data
+   local finger_data = ""
    if req.fingerprint then
       len = len + 8 
-      data = bin.pack(">SSA",s_type,len,data)
-      local crc = bit32.bxor(crc32.hash(data),0x5354554e)         
-      data = bin.pack(">ACCCCI",data,0x80,0x28,0x00,0x04,crc)
-   else
-      data = bin.pack(">SSA",s_type,len,data)
+      local data2 = bin.pack(">SSIILA",s_type,len,STUN_MAGIC_COOKIE,0,req.tx_id,attrs)
+      local crc = bit32.bxor(crc32.hash(data2),0x5354554e)         
+      finger_data = bin.pack(">SSA",0x8028,0x0004,crc)
    end
+   attrs = attrs..finger_data
+   
+   local data = bin.pack(">SSIILA",s_type,len,STUN_MAGIC_COOKIE,0,req.tx_id,attrs)
    
    return data
 end
 function stun.decode(data,sz,key)
    local req = stun.new()
-   local len  = sz - 8
+   local len 
    --local f = ">SSA" .. len..">CCCCI"
-   local pos,d1
+   local pos
    --check finger print
    if sz > 20 + 8 then
-      local d1,c1,c2,c3,c4,crc
-      pos,d1,c1,c2,c3,c4,crc= bin.unpack(">A"..len,data,sz)
-      if c1 == 0x080 and c1 == 0x28 and c3 == 0x0 and c4 == 0x04 then
+      local msg,finger,crc,finger_len
+      pos,d1,finger,finger_len,crc= bin.unpack(">A"..(sz-8).."IIS",data,sz)
+      if c1 == 0x8028 then
 	 local crc1 = bit32.bxor(crc32.hash(msg),0x5354554e)
 	 if crc1 ~= crc then
 	    return false
 	 end
 	 req.fingerprint = true
-	 sz = sz -8
       else
 	 req.fingerprint = false
 	 print("no crc was found in stun message")
@@ -318,23 +322,21 @@ function stun.decode(data,sz,key)
       if sz < 20 + 24 then
 	 return false
       end
-      len = sz -24
-      f = ">A"..len.."CCCC".."A20"
-      pos,data,c1,c2,c3,c4,finger  = bin.unpack(f,data,sz)
-      if c1 == 0x000 and c1 == 0x08 and c3 == 0x00 and c4 == 0x14 and finger then
-	 local finger2 = crypto:sha_mac(key,data)
+      f = ">A"..(sz-24).."II".."A20"
+      local msg,t1,tlen
+      pos,msg,t1,tlen,finger  = bin.unpack(f,data,sz)
+      if t1==0x0008 and finger then
+	 local finger2 = crypto:hmac("sha1",msg,key)
 	 if finger == finger2 then
 	    req.integrity = true
-	    sz = sz - 24
 	 else
 	    return false
 	 end
       else
 	 return false
       end
-
    end
-   local pos,s_type,len,magic_cookie,tmp,tx_id,data_attrs = bin.unpack(">SSIILA"..(len-16),data,sz)
+   local pos,s_type,len,magic_cookie,tmp,tx_id = bin.unpack(">SSIIL",data,sz)
    if req.fingerprint then
       len = len - 8
    end
