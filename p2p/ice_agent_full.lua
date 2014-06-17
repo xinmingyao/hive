@@ -28,7 +28,7 @@ local pair_id = 1
 local ta = 20 -- timeout for gather and check
 local max_count = 3 -- max timeout
 local que_meta = {} 
-
+local peer_pwd 
 
 local function get_pair_by_id(sid,pair_id)
    local pairs = local_streams[sid].checklist
@@ -220,10 +220,11 @@ local function is_gather_complete()
 end
 
 local function do_gather(req)
+   print(req.class,req.method)
    if gather_tx[req.tx_id] then
       local gather = gather_tx[req.tx_id].gather
       local host = gather.c
-      local addr  = req.attrs['XOR-MAPPED-ADDRESS']
+      local addr  = req.attrs['XOR_MAPPED_ADDRESS']
       local ip,port = addr.ip,addr.port
       local c = {type="CANDIDATE_TYPE_SERVER_REFLEXIVE",
 		 transport = "udp",
@@ -237,7 +238,7 @@ local function do_gather(req)
 		 stun_ip = gather.stun_ip,
 		 stun_port = gather.stun_port
       }	       
- --     print(ip,port)
+      print("xor-mapping-address",ip,port)
       table.insert(local_streams[host.sid].locals,c)
       gather_tx[req.tx_id] = nil
       is_gather_complete()
@@ -424,7 +425,7 @@ local function do_running(req,fd,peer_ip,peer_port)
 	 local pair = get_pair_by_id(tx.sid,tx.pair_id)
 	 local validpair = {}
 	 --rfc 7.1.3.2
-	 local addr = req:get_addr_value('XOR-PEER-ADDRESS')
+	 local addr = req:get_addr_value('XOR_MAPPED_ADDRESS')
 	 if addr.ip == pair.r.addr.ip and addr.port == pair.r.addr.port then
 	    deep_copy(validpair,pair)
 	 else -- peer flex
@@ -500,7 +501,7 @@ local function do_running(req,fd,peer_ip,peer_port)
       
       local rep = stun.new('response','binding',req.tx_id)
       local priority = req:get_addr_value('PRIORITY',priority)
-      rep:add_attr('XOR-PEER-ADDRESS',{ip=peer_ip,port=peer_port})
+      rep:add_attr('XOR_MAPPED_ADDRESS',{ip=peer_ip,port=peer_port})
       rep:add_attr('PRIORITY',priority)
       local data = rep:encode()
       socket:write(data,peer_ip,peer_port)
@@ -639,7 +640,7 @@ local function gather_rto_timer(time,tid)
       gather_tx[tid].count = count
       local gather = gather_tx[tid].gather
       local req = stun.new("request","binding",tid)
-      req.fingerprint = false
+      --req.fingerprint = false
       local data = req:encode()
       local s = gather.c.socket
       s:write(data,gather.stun_ip,gather.stun_port)
@@ -654,11 +655,10 @@ local function gather_timer(time,sid)
       return
    end
    local gather = gather_que:pop()
-   local tid = tx_id
+   local tid = get_txid()
    gather_tx[tid] = {count=1,gather = gather}
-   tx_id = tx_id +1
-   local req = stun.new("request","binding",tx_id)
-   req.fingerprint = false
+   local req = stun.new("request","binding",tid)
+   --req.fingerprint = false
    local data = req:encode()
    local s = gather.c.socket
    s:write(data,gather.stun_ip,gather.stun_port)
@@ -721,6 +721,8 @@ local function build_pair()
 	 for k=1,#(remotes) do 
 	    local c2 = remotes[k]
 	    if c1.cid == c2.cid then
+	       --todo fix peer pwd
+	       peer_pwd = c2.pwd
 	       local pair = {id=get_pairid(),fid=""..c1.fid..c2.fid,l=c1,r=c2,
 			     state = "PAIR_FROZEN",
 			     sid = c1.sid,
@@ -777,19 +779,20 @@ local function do_send_check(pair,tid)
    local priority = compute_candidate_priority("CANDIDATE_TYPE_SERVER_REFLEXIVE",pair.cid)
    local req = stun.new("request","binding",tid)
    req:add_attr('PRIORITY',priority)
-   
    req:add_attr('USERNAME',pair.r.user ..":".. pair.l.user)
    req:add_attr('PASSWORD',pair.r.pwd)
    if role == "contrlling" then
       if pair.is_nominate then
-	 req:add_attr('USE-CANDIDATE',1)
+	 req:add_attr('USE_CANDIDATE',1)
       end
-      req:add_attr('ICE-CONTROLLING',tie_break)
+      req:add_attr('ICE_CONTROLLING',tie_break)
    else
-      req:add_attr('ICE-CONTROLLED',tie_break)
+      req:add_attr('ICE_CONTROLLED',tie_break)
    end
+   req.key = peer_pwd
    local data = req:encode()
    local socket = pair.l.socket
+   --print(#data)
    socket:write(data,pair.r.addr.ip,pair.r.addr.port)
 end
 
