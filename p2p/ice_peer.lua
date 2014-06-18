@@ -25,17 +25,17 @@ function peer_meta:send(sid,cid,msg,sz)
       msg,sz = srtp.pack_rtp(msg,sz,self.ssrc,ts,self.seq)
       self.seq = self.seq + 1
    end
-   cell.send(self.pid,send,sid,cid,msg,sz)
+   cell.send(self.pid,"send",sid,cid,msg,sz)
 end
 
-function peer_meta:receive(agent,sid,cid,msg,sz)
+local function ice_receive(opts,agent,sid,cid,msg,sz)
    local ssrc,ts,seq
-   if self.dtls then
+   if opts.dtls then
       msg,sz,ssrc,ts,seq = srtp.unpack(msg,sz)
    end
    local f =  cell.get_message("receive")
    assert(f)
-   f(sid,cid,msg,sz,ts,seq)
+   f(sid,cid,msg,sz)
 end
 
 function peer.new(streams_info,stun_servers,opts)
@@ -53,8 +53,7 @@ function peer.new(streams_info,stun_servers,opts)
       p.seq = 1
       p.ssrc = ssrc
    end
-   cell.add_message("ice_receive",peer_meta.receive)
-   assert(peer_meta.receive)
+   cell.add_message("ice_receive",ice_receive)
    local pid = cell.cmd("launch", "p2p.ice_agent_full",streams_info,stun_servers,opts)
    p.pid = pid
    return setmetatable(p,{__index = peer_meta})

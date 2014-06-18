@@ -30,30 +30,6 @@ local max_count = 3 -- max timeout
 local que_meta = {} 
 local peer_pwd 
 
-local function get_pair_by_id(sid,pair_id)
-   local pairs = local_streams[sid].checklist
-   local i
-   for i=1,#pairs do
-      if pair_id == pairs[i].id then
-	 return pairs[i]
-      end
-   end
-   assert(false,"should not happen!")
-end
-
-
-
-local function compute_candidate_priority(t,cid)
-   local type_value = {
-      CANDIDATE_TYPE_HOST = 120,
-      CANDIDATE_TYPE_PEER_REFLEXIVE = 110,
-      CANDIDATE_TYPE_SERVER_REFLEXIVE = 100,
-      CANDIDATE_TYPE_RELAYED = 60
-   }
-   assert(type_value[t])
-   return bit.lshift(1,24) * type_value[t] + bit.lshift(1,8) * 1 + 1*(256-cid) 
-end
-
 local function get_txid()
    local t = tx_id
    tx_id = tx_id + 1
@@ -132,6 +108,114 @@ local function deep_copy(src,dst)
       else
 	 src[i] = v
       end
+   end
+end
+
+
+
+local function get_pair_by_id(sid,pair_id)
+   local pairs = local_streams[sid].checklist
+   local i
+   for i=1,#pairs do
+      if pair_id == pairs[i].id then
+	 return pairs[i]
+      end
+   end
+   assert(false,"should not happen!")
+end
+
+
+
+local function compute_pair_priority(pair)
+   local p,max,min,v
+   local p1 = pair.l.priority
+   local p2 = pair.r.priority
+   if p1 > p2 then
+      max,min = p1,p2
+   else
+      max,min = p2,p1
+   end
+   if role == "contrlling" and p1 > p2 then
+      v = 1
+   else
+      v = 0
+   end
+   return bit.lshift(1,32) * min + 2 * max +v
+end
+local function priority_checklist()
+   local i
+   for i=1,#local_streams do
+      local stream = local_streams[i]
+      local j
+      for j=1,#stream.checklist do
+	 local pair = stream.checklist[j]
+	 pair.priority = compute_pair_priority(pair)
+      end
+   end
+end
+local function sort_checklist()
+   local i
+   for i=1,#local_streams do
+      local stream = local_streams[i]
+      table.sort(stream.checklist,function(paira,pairb)
+		    return paira.priority > pairb.priority
+      end)
+   end
+end
+
+
+local function compute_candidate_priority(t,cid)
+   local type_value = {
+      CANDIDATE_TYPE_HOST = 120,
+      CANDIDATE_TYPE_PEER_REFLEXIVE = 110,
+      CANDIDATE_TYPE_SERVER_REFLEXIVE = 100,
+      CANDIDATE_TYPE_RELAYED = 60
+   }
+   assert(type_value[t])
+   return bit.lshift(1,24) * type_value[t] + bit.lshift(1,8) * 1 + 1*(256-cid) 
+end
+
+
+local function cancel_checklist(sid,pair)
+   local checklist = local_streams[sid].checklist
+   local i
+   for i=1,#checklist do
+      local p1 = checklist[i]
+      if pair.cid == p1.cid and pair.id ~= p1.id then
+	 -- do nothing
+	 p1.state = "PAIR_CANCELLED"
+      end
+   end
+end
+
+local function update_checklist_state(sid)
+   local checklist = local_streams[sid].checklist
+   local i
+   for i=1,#checklist do
+      local pair = checklist[i]
+      if pair.state == "PAIR_IN_PROGRESS" or pair.state == "PAIR_WAITING" or pair.state == " PAIR_FROZEN" then
+	 -- do nothing
+	 return
+      end
+   end
+   
+   local componets = streams_info[sid].components
+   local tmp = {}
+   for i = 1,#componets do
+      local cid = componets[i].cid
+      local j
+      local validlist = local_streams[sid].validlist
+      for j=1 ,#validlist do
+	 if validlist[j].cid == cid then
+	    table.insert(tmp,cid)
+	 end
+      end
+   end
+   
+   if #tmp == #componets then
+      local_streams[sid].checklist_state = "CHECKLIST_COMPLETED"
+   else
+      local_streams[sid].checklist_state = "CHECKLIST_FAILED"
    end
 end
 
@@ -220,7 +304,6 @@ local function is_gather_complete()
 end
 
 local function do_gather(req)
-   print(req.class,req.method)
    if gather_tx[req.tx_id] then
       local gather = gather_tx[req.tx_id].gather
       local host = gather.c
@@ -247,6 +330,28 @@ end
 
 
 
+local function do_send_check(pair,tid)
+   local sid = pair.sid
+   local priority = compute_candidate_priority("CANDIDATE_TYPE_SERVER_REFLEXIVE",pair.cid)
+   local req = stun.new("request","binding",tid)
+   req:add_attr('PRIORITY',priority)
+   req:add_attr('USERNAME',pair.r.user ..":".. pair.l.user)
+   req:add_attr('PASSWORD',pair.r.pwd)
+   if role == "controlling" then
+      if pair.is_nominate then
+	 req:add_attr('USE_CANDIDATE',1)
+      end
+      req:add_attr('ICE_CONTROLLING',tie_break)
+   else
+      req:add_attr('ICE_CONTROLLED',tie_break)
+   end
+   req.key = peer_pwd
+   local data = req:encode()
+   local socket = pair.l.socket
+   socket:write(data,pair.r.addr.ip,pair.r.addr.port)
+end
+
+
 local function nominate_rto_timer(time,txid)
    local tx = check_tx[txid]
    if not tx then
@@ -254,12 +359,12 @@ local function nominate_rto_timer(time,txid)
    end
    local index = tx.index
    local pair = local_streams[tx.sid].validlist[index]
-   if count > 3 then
+   if tx.count > 3 then
       --should not happen 
       assert(false,"nominate error!")
    else      
       do_send_check(pair,txid)
-      tx.count = count +1
+      tx.count = tx.count +1
       cell.timeout(time,function()
 		      nominate_rto_timer(time,txid)
       end)
@@ -274,7 +379,7 @@ local function regula_nominate_timer(time,sid)
       local index = que:pop()
       local pair = local_streams[sid].validlist[index]
       local tid = get_txid()
-      check_tx[tid] = {sid=sid,index= index,count=1}
+      check_tx[tid] = {sid=sid,index= index,count=1,is_nominate=true}
       pair.is_nominate = true
       do_send_check(pair,tid)
       cell.timeout(ta,function()
@@ -291,7 +396,6 @@ local function start_regula_nominate(sid)
       if local_streams[sid].regula_nominate then
 	 return 
       end
-
       local_streams[sid].regula_nominate = true
 
       local que = new_que()
@@ -318,7 +422,7 @@ local function is_agent_succeed()
    end
    if failed then
       state = "failed"
-      cell.wakeup(set_remotes,true,state)
+      cell.wakeup(set_remotes_ev,true,state)
       return
    end
    
@@ -348,7 +452,7 @@ local function is_agent_succeed()
 	    local j
 	    for j=1,#validlist do
 	       local pair = validlist[j]
-	       local socket = pair.l.c.socket
+	       local socket = pair.l.socket
 	       local r,msg
 	       local cfg = opts.dtls_config
 	       assert(cfg)
@@ -358,6 +462,7 @@ local function is_agent_succeed()
 		  r,ssl_socket  = socket:dtls_connect(cfg,pair.r.addr.ip,pair.r.addr.port)
 	       end
 	       if r then
+		  print("----",ssl)
 		  local srtp = lua_srtp.new()
 		  local send_key,receiving_key =  ssl.dtls_session_keys(ssl_socket)
 		  lua_srtp.set_rtp(srtp,send_key,receiving_key)
@@ -409,6 +514,7 @@ local function do_running(req,fd,peer_ip,peer_port)
    elseif req.class =="response" then
       local tid = req.tx_id
       local tx = check_tx[tid]
+      check_tx[tid] = nil
       if not tx then
 	 return
       end
@@ -416,7 +522,7 @@ local function do_running(req,fd,peer_ip,peer_port)
 	 local validlist = local_streams[tx.sid].validlist
 	 local i
 	 for i = 1,#validlist do
-	    if tx.pair_id == validlist[i].pair_id then
+	    if tx.index == i then
 	       validlist[i].is_nominate = true
 	       break
 	    end
@@ -426,7 +532,7 @@ local function do_running(req,fd,peer_ip,peer_port)
 	 local validpair = {}
 	 --rfc 7.1.3.2
 	 local addr = req:get_addr_value('XOR_MAPPED_ADDRESS')
-	 if addr.ip == pair.r.addr.ip and addr.port == pair.r.addr.port then
+	 if addr.ip == pair.l.addr.ip and addr.port == pair.l.addr.port then
 	    deep_copy(validpair,pair)
 	 else -- peer flex
 	    local priority = req:get_addr_value('PRIORITY')
@@ -452,18 +558,23 @@ local function do_running(req,fd,peer_ip,peer_port)
 	    validpair.id = get_pairid()
 	    validpair.priority = compute_pair_priority(validpair)
 	 end
-      end
-      pair.state = "PAIR_COMPLETED"
-      update_checklist_state(tx.sid)
-      table.insert(local_streams[tx.sid].validlist,validpair)
-      if role == "controlling" then
-	 start_regula_nominate()
+
+	 table.insert(local_streams[tx.sid].validlist,validpair)
+     
+	 pair.state = "PAIR_COMPLETED"
+	 cancel_checklist(tx.sid,pair)
+	 update_checklist_state(tx.sid)
+	 
+	 if role == "controlling" then
+	    start_regula_nominate(tx.sid)
+	 end
+	 
       end
       is_agent_succeed()
    elseif req.class == "request" and req.method == "binding" then
       local conflict = false
       local role_change = false
-      local use_candidate = req:get_addr_value('USE-CANDIDATE')
+      local use_candidate = req:get_addr_value('USE_CANDIDATE')
       if role == "controlling" then
 	 if req:get_addr_value('CONTROLLING') then
 	    if 	tie_break >  req:get_addr_value('CONTROLLING') then
@@ -505,7 +616,6 @@ local function do_running(req,fd,peer_ip,peer_port)
       rep:add_attr('PRIORITY',priority)
       local data = rep:encode()
       socket:write(data,peer_ip,peer_port)
-      print(string.len(data))
       -- find peer flex
       local i 
       local new_remote = true
@@ -547,8 +657,8 @@ local function do_running(req,fd,peer_ip,peer_port)
 	    pair.is_nominate = true 
 	 end
 	 if state == "PAIR_IN_PROGRESS" then
-	    pair.state = "PAIR_WAITING"
-	    que:append_if_not_exist({sid=pair.sid,pair_id=pair.id})
+	   -- pair.state = "PAIR_WAITING"
+	   -- que:append_if_not_exist({sid=pair.sid,pair_id=pair.id})
 	 elseif state == "PAIR_FROZEN" then
 	    pair.state = "PAIR_WAITING"
 	    que:append({sid=pair.sid,pair_id=pair.id})
@@ -735,66 +845,7 @@ local function build_pair()
    end
 end
 
-local function compute_pair_priority(pair)
-   local p,max,min,v
-   local p1 = pair.l.priority
-   local p2 = pair.r.priority
-   if p1 > p2 then
-      max,min = p1,p2
-   else
-      max,min = p2,p1
-   end
-   if role == "contrlling" and p1 > p2 then
-      v = 1
-   else
-      v = 0
-   end
-   return bit.lshift(1,32) * min + 2 * max +v
-end
-local function priority_checklist()
-   local i
-   for i=1,#local_streams do
-      local stream = local_streams[i]
-      local j
-      for j=1,#stream.checklist do
-	 local pair = stream.checklist[j]
-	 pair.priority = compute_pair_priority(pair)
-      end
-   end
-end
-local function sort_checklist()
-   local i
-   for i=1,#local_streams do
-      local stream = local_streams[i]
-      table.sort(stream.checklist,function(paira,pairb)
-		    return paira.priority > pairb.priority
-      end)
-   end
-end
 
-
-
-local function do_send_check(pair,tid)
-   local sid = pair.sid
-   local priority = compute_candidate_priority("CANDIDATE_TYPE_SERVER_REFLEXIVE",pair.cid)
-   local req = stun.new("request","binding",tid)
-   req:add_attr('PRIORITY',priority)
-   req:add_attr('USERNAME',pair.r.user ..":".. pair.l.user)
-   req:add_attr('PASSWORD',pair.r.pwd)
-   if role == "contrlling" then
-      if pair.is_nominate then
-	 req:add_attr('USE_CANDIDATE',1)
-      end
-      req:add_attr('ICE_CONTROLLING',tie_break)
-   else
-      req:add_attr('ICE_CONTROLLED',tie_break)
-   end
-   req.key = peer_pwd
-   local data = req:encode()
-   local socket = pair.l.socket
-   --print(#data)
-   socket:write(data,pair.r.addr.ip,pair.r.addr.port)
-end
 
 local function trigger_check(sid)
    local trigger_que = local_streams[sid].trigger_que
@@ -818,6 +869,7 @@ local function order_check(sid)
 		    PAIR_IN_PROGRESS = 0,
 		    PAIR_COMPLETED = 0,
 		    PAIR_FAILED = 0,
+		    PAIR_CANCELLED = 0,
 		    PAIR_FROZEN  = 1,
 		    PAIR_WAITING = 2
 		 }
@@ -835,6 +887,7 @@ local function order_check(sid)
    if pair.state == "PAIR_WAITING" or pair.state == "PAIR_FROZEN" then
       local tid = get_txid()
       check_tx[tid] = {count=1,sid=sid,pair_id=pair.id}
+      assert(pair.id)
       do_send_check(pair,tid)
       pair.state = "PAIR_IN_PROGRESS"
       return tid
@@ -843,37 +896,6 @@ local function order_check(sid)
 end
 
 
-
-local function update_checklist_state(sid)
-   local checklist = local_streams[sid].checklist
-   local i
-   for i=1,#checklist do
-      local pair = checklist[i]
-      if pair.state == "PAIR_IN_PROGRESS" or pair.state == "PAIR_WAITING" or pair.state == " PAIR_FROZEN" then
-	 -- do nothing
-	 return
-      end
-   end
-   
-   local componets = streams_info[sid].components
-   local tmp = {}
-   for i = 1,#componets do
-      local cid = componets[i].cid
-      local j
-      local validlist = local_streams[sid].validlist
-      for j=1 ,#validlist do
-	 if validlist[j].cid == cid then
-	    table.insert(tmp,cid)
-	 end
-      end
-   end
-   
-   if #tmp == #componets then
-      local_streams[sid].checklist_state = "CHECKLIST_COMPLETED"
-   else
-      local_streams[sid].checklist_state = "CHECKLIST_FAILED"
-   end
-end
 
 local function check_rto_timer(time,txid)
    local tx = check_tx[txid]
@@ -1001,7 +1023,7 @@ cell.message {
 	    assert(srtp)
 	    sz = lua_srtp.protected(srtp,msg,sz)
 	 end
-	 cell.send(opts.client,"ice_receive",cell.self,sid,cid,msg,sz)
+	 cell.send(opts.client,"ice_receive",opts,cell.self,sid,cid,msg,sz)
       end
    end
 }
@@ -1023,7 +1045,8 @@ cell.command {
       assert(type(remote_streams) == "table")
       set_remotes_ev = cell.event()
       do_ice_handshake()
-      local ok,msg = cell.wait()
+      cell.wait(set_remotes_ev)
+      print("handshake completed,state:",state)
       return ok,msg
    end,
    sleep = function(T)

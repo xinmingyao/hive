@@ -3,6 +3,7 @@ local ice_peer = require "p2p.ice_peer"
 local peer
 local sid = 1
 local cid = 1
+local bin = require "cell.binlib"
 cell.command {
 	ping = function()
 		cell.sleep(1)
@@ -23,8 +24,10 @@ cell.command {
 }
 
 cell.message {
-   receive = function(...)
-      print(...)
+   receive = function(sid,cid,msg,sz)
+      local pos,data = bin.unpack("A"..sz,msg,sz)
+      peer:send(sid,cid,"pong")
+      print("received:",data)
    end
 }
 
@@ -48,7 +51,16 @@ function cell.main(port,remotes)
       {
 	 {ip="107.23.150.92",port=3478}
       }
-   local opts = {}
+   local cfg = {
+      mode = "client",
+      protocol = "dtlsv1",
+      key = "./certs/client/key.pem",
+      certificate = "./certs/client/cert.pem",
+      cafile = "./certs/client/cacerts.pem",
+      --      verify = {"peer", "fail_if_no_peer_cert"},
+      --      options = {"all", "no_sslv2"}
+   }
+   local opts = {dtls=true,dtls_config=cfg}
    peer = ice_peer.new(streams_info,stun_servers,opts)
    local ok,info = peer:answer()
    cell.timeout(0,function()

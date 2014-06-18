@@ -16,9 +16,9 @@ function cell.main()
    print("peer test launched")
    local remote_info
    client,ok,remote_info = cell.cmd("launch", "test.ice_peer_client",9001)
-   print(remote_info[1].locals[1].priority)
+   print(#remote_info[1].locals)
    server,ok,server_info = cell.cmd("launch", "test.ice_peer_server",9002,remote_info)
-   print("vvv:",server_info[1].locals[1].priority)
+   print("vvv:",#server_info[1].locals)
    cell.call(client,"set_remotes",server_info)
    cell.call(client,"ping")
    return 

@@ -64,7 +64,16 @@ local function decode_attr_int(data,len,sz,pos)
 end
 
 local function decode_attr_string(data,len,sz,pos)
-   return bin.unpack(">A"..len,data,sz,pos)
+   local t = len % 4 
+   if t == 0 then
+      return bin.unpack(">A"..len,data,sz,pos)
+   else
+      local padding = 4 - t
+      local f = ">A"..len.."A"..padding 
+      local value,tmp
+      pos,value,tmp = bin.unpack(f,data,sz,pos)
+      return pos,value
+   end
 end
 
 local function decode_attr_err(data,len,sz,pos)
@@ -113,8 +122,16 @@ end
 local function encode_attr_string(atype,str)
    assert(type(str)=="string")
    local len = string.len(str)
-   local f = ">SSA"
-   return bin.pack(f,atype,len,str)
+   local t = len % 4 
+   if t==0 then
+      local f = ">SSA"
+      return bin.pack(f,atype,len,str)
+   else
+      local padding = 4- t
+      local f = ">SSAA"
+      local pad = string.rep("\0",padding)
+      return bin.pack(f,atype,len,str,pad)
+   end
 end
 
 local function encode_attr_int(atype,num)
