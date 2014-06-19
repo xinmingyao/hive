@@ -316,7 +316,7 @@ static lioctl(lua_State *L){
   int type = luaL_checkinteger(L,2);
   if (type == 1){
     int state = luaL_checkinteger(L,3);
-    int udp_listen =luaL_checkinteger(L,4);
+    int udp_listen =luaL_optint(L,4,0);
     s->ssl_type = SSL_DTLS;
     s->ssl_state = state;
     s->udp_listen = udp_listen;
@@ -546,6 +546,7 @@ lpoll(lua_State *L) {
 			if (s->listen) {
 				t += accept_result(L, t, e->s, p);
 			} else {
+			  printf ("111 fd%d  %d %d\n",p->fd,s->ssl_type,s->ssl_state);
 			  if(s->ssl_type >=1 && s->ssl_state == LHIVE_STATE_NEW) {// 4 ssl handshake
 			    /*
 			    if(s->udp_listen == 1){ //connect to peer,for openssl handshake

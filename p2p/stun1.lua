@@ -2,6 +2,7 @@ local bin = require "cell.binlib"
 local crc32 = require "protocol.crc32"
 local p2p_lib = require "p2p.p2p_lib"
 local bit  = require "bit32"
+local ssl = require("ssl")
 local crypto = require "crypto"
 local hmac = crypto.hmac
 local STUN_MARKER = 0

@@ -462,9 +462,9 @@ local function is_agent_succeed()
 		  r,ssl_socket  = socket:dtls_connect(cfg,pair.r.addr.ip,pair.r.addr.port)
 	       end
 	       if r then
-		  print("----",ssl)
+		  print("----",r,ssl)
 		  local srtp = lua_srtp.new()
-		  local send_key,receiving_key =  ssl.dtls_session_keys(ssl_socket)
+		  local send_key,receiving_key =  ssl_socket:dtls_session_keys()
 		  lua_srtp.set_rtp(srtp,send_key,receiving_key)
 		  pair.srtp = srtp
 		  pair.ssl = ssl_socket
@@ -1000,7 +1000,8 @@ cell.message {
       --todo peek msg
       local pos,b1 = bin.unpack(">C",msg,sz)
       if b1 == 0x16 then --dtls
-      elseif bit.rshift(b1,6) == 0x0 then
+      elseif (state=="running" or state=="gather") and bit.rshift(b1,6) == 0x0 then
+	 print(state,sz)
 	 local ok,req = stun.decode(msg,sz)
 	 if states[state] then
 	    states[state](req,fd,peer_ip,peer_port)
