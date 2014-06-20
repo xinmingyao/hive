@@ -29,7 +29,12 @@ local ta = 20 -- timeout for gather and check
 local max_count = 3 -- max timeout
 local que_meta = {} 
 local peer_pwd 
-
+local seqno = 1
+local function get_seq()
+   local old = seqno
+   seqno = seqno +1
+   return old
+end
 local function get_txid()
    local t = tx_id
    tx_id = tx_id + 1
@@ -386,7 +391,7 @@ local function regula_nominate_timer(time,sid)
 		    regula_nominate_timer(time,sid)
       end)
       cell.timeout(ta,function()
-		    nominate_rto_timer(ta,tid)
+		    --nominate_rto_timer(ta,tid)
       end)
    end
 end
@@ -414,6 +419,9 @@ end
 local function is_agent_succeed()
    local i
    local failed = true
+   if state == "completed" or state =="failed" then
+      return 
+   end
    for i =1 ,#local_streams do
       if local_streams[i].checklist_state ~= "CHECKLIST_FAILED" then
 	 failed = false
@@ -459,12 +467,15 @@ local function is_agent_succeed()
 	       if role == "controlling" then
 		  r,ssl_socket = socket:dtls_listen(cfg,pair.r.addr.ip,pair.r.addr.port)
 	       else
+		  print("begin connect",role)
 		  r,ssl_socket  = socket:dtls_connect(cfg,pair.r.addr.ip,pair.r.addr.port)
 	       end
 	       if r then
 		  print("----",r,ssl)
+		  lua_srtp.srtp_init()
 		  local srtp = lua_srtp.new()
 		  local send_key,receiving_key =  ssl_socket:dtls_session_keys()
+		  --print("keys:",string.len(send_key),string.len(receiving_key))
 		  lua_srtp.set_rtp(srtp,send_key,receiving_key)
 		  pair.srtp = srtp
 		  pair.ssl = ssl_socket
@@ -986,8 +997,10 @@ cell.message {
 	    local socket = pair.l.socket
 	    if opts.dtls then
 	       local srtp = pair.srtp
-	       sz = lua_srtp.protected(srtp,msg,sz)
-	       socket:write_raw(msg,sz,pair.r.addr.ip,pair.r.addr.port)
+	       local rtp,rtp_sz = lua_srtp.pack_rtp(msg,1,get_seq(),os.time())
+	       local ok,new_sz = lua_srtp.protect_rtp(srtp,rtp,rtp_sz)
+	       print("xxx",rtp,new_sz,rtp_sz)
+	       socket:write_raw(rtp,new_sz,pair.r.addr.ip,pair.r.addr.port)
 	    else
 	       socket:write(msg,pair.r.addr.ip,pair.r.addr.port)
 	    end
@@ -1022,7 +1035,13 @@ cell.message {
 	       end
 	    end
 	    assert(srtp)
-	    sz = lua_srtp.protected(srtp,msg,sz)
+	    print(msg,sz)
+	    local ok,rtp_sz = lua_srtp.unprotect_rtp(srtp,msg,sz)
+
+	    assert(ok)
+	    local new_msg,new_sz = lua_srtp.unpack_rtp(msg,rtp_sz)
+	    cell.send(opts.client,"ice_receive",opts,cell.self,sid,cid,new_msg,new_sz)
+	    return 
 	 end
 	 cell.send(opts.client,"ice_receive",opts,cell.self,sid,cid,msg,sz)
       end

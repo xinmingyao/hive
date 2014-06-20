@@ -31,7 +31,7 @@ end
 local function ice_receive(opts,agent,sid,cid,msg,sz)
    local ssrc,ts,seq
    if opts.dtls then
-      msg,sz,ssrc,ts,seq = srtp.unpack(msg,sz)
+      --msg,sz,ssrc,ts,seq = srtp.unpack(msg,sz)
    end
    local f =  cell.get_message("receive")
    assert(f)

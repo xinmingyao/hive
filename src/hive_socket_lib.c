@@ -546,7 +546,6 @@ lpoll(lua_State *L) {
 			if (s->listen) {
 				t += accept_result(L, t, e->s, p);
 			} else {
-			  printf ("111 fd%d  %d %d\n",p->fd,s->ssl_type,s->ssl_state);
 			  if(s->ssl_type >=1 && s->ssl_state == LHIVE_STATE_NEW) {// 4 ssl handshake
 			    /*
 			    if(s->udp_listen == 1){ //connect to peer,for openssl handshake
@@ -557,7 +556,7 @@ lpoll(lua_State *L) {
 			      recvfrom(s->fd,buffer,READ_BUFFER,MSG_PEEK,(struct sockaddr *)&addr ,&addr_len);
 			      connect(s->fd,(struct sockaddr *)&addr,sizeof(addr_len));
 			      }*/
-			    t+= push_ssl_event(L,t,e->s,p,EVENT_READ);
+			    t+= push_ssl_event(L,t,e->s,p,-1);
 			  }else{
 			    t += push_result(L, t, e->s, p);
 			  }
@@ -566,7 +565,7 @@ lpoll(lua_State *L) {
 		if (e->write) {
 		  struct socket *s = e->s;
 		  if(s->ssl_type >=1 && s->ssl_state == LHIVE_STATE_NEW) {// 4 ssl handshake
-			    t+= push_ssl_event(L,t,e->s,p,EVENT_WRITE);
+			    t+= push_ssl_event(L,t,e->s,p,-2);
 		  }else{
 		    sendout(p, s);
 		    if (s->status == STATUS_HALFCLOSE && s->head == NULL) {

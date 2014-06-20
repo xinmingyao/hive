@@ -17,6 +17,7 @@ cell.command {
 	   return peer:set_remotes(...)
 	end,
 	ping = function()
+	   peer:send(sid,cid,"12345678")
 	   peer:send(sid,cid,"ping")
 	   --assert(pong == "pong")
 	end
@@ -26,7 +27,7 @@ cell.command {
 cell.message {
    receive = function(sid,cid,msg,sz)
       local pos,data = bin.unpack("A"..sz,msg,sz)
-      print("receive:",data)
+      print("client receive:",data)
    end
 }
 
