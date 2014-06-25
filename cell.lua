@@ -458,7 +458,7 @@ function socket:readbytes(bytes)
 end
 
 function socket:readline(sep)
-	local fd = self.__fd
+        local fd = self.__fd
 	if sockets_closed[fd] then
 		sockets[fd] = nil
 		return
@@ -512,7 +512,6 @@ cell.dispatch {
 			suspend(nil, nil, co, coroutine.resume(co))
 			return
 		end
-
 		local udp = sockets_udp[fd]
 		if udp then
 		   local ssl_s = socket_ssl[fd]
@@ -731,5 +730,10 @@ function cell.write_fd(fd,msg,...)
 end
 function cell.init()
    sockets_fd = sockets_fd or cell.cmd("socket")
+end
+
+function cell.push(fd,msg,sz)
+   local buffer,bsz = csocket.push(sockets[fd],msg,sz)
+   sockets[fd] = buffer
 end
 return cell

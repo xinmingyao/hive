@@ -29,7 +29,7 @@ local ta = 20 -- timeout for gather and check
 local max_count = 3 -- max timeout
 local que_meta = {} 
 local peer_pwd 
-local seqno = 1
+local seqno = math.random(0,bit.lshift(2,16))
 local function get_seq()
    local old = seqno
    seqno = seqno +1
@@ -476,7 +476,11 @@ local function is_agent_succeed()
 		  local srtp = lua_srtp.new()
 		  local send_key,receiving_key =  ssl_socket:dtls_session_keys()
 		  --print("keys:",string.len(send_key),string.len(receiving_key))
-		  lua_srtp.set_rtp(srtp,send_key,receiving_key)
+		  if role =="controlling" then
+		     lua_srtp.set_rtp(srtp,receiving_key,send_key)
+		  else
+		     lua_srtp.set_rtp(srtp,send_key,receiving_key)
+		  end
 		  pair.srtp = srtp
 		  pair.ssl = ssl_socket
 	       else
