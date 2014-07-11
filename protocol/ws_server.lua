@@ -11,6 +11,7 @@ local char = string.char
 local str_find = string.find
 local crypto = require "crypto"
 local digest = crypto.digest
+local hmac = crypto.hmac
 local base64 = require "base64"
 local band = bit.band
 local rshift = bit.rshift
@@ -65,25 +66,28 @@ function _M.new(fd,handle,opts)
    if protocols then
       ngx_header["Sec-WebSocket-Protocol"] = protocols
    end
-   ngx_header["Upgrade"] = "websocket"
+   ngx_header["connection"] = "Upgrade"
+   ngx_header["upgrade"] = "websocket"
    
    local d = digest.new("sha1")
-   local sha1 = d:final(key .. "258EAFA5-E914-47DA-95CA-C5AB0DC85B11")
-   ngx_header["Sec-WebSocket-Accept"] = base64.encode(sha1)
+-- local sha1 = d:final(key .. "258EAFA5-E914-47DA-95CA-C5AB0DC85B11")
+   local sha1 = crypto.digest("sha1",key.."258EAFA5-E914-47DA-95CA-C5AB0DC85B11",true)
+   ngx_header["sec-websocket-accept"] = base64.encode(sha1)
    
 --   ngx_header["Content-Type"] = nil
 
    local status = 101
-   local request_line = " HTTP/1.1 ".. status .." Switching Protocols"
+   local request_line = "HTTP/1.1 ".. status .." Switching Protocols"
    local rep ={}
    table.insert(rep,request_line)
    local k,v
    for k,v in pairs(ngx_header) do
-      local str = string.format('%s=%s',k,v)
+      local str = string.format('%s: %s',k,v)
       table.insert(rep,str)
    end
    rep = table.concat(rep,"\r\n")
    rep = rep.."\r\n\r\n"
+   print(rep)
    sock:write(rep)
    
    local max_payload_len, send_masked, timeout
