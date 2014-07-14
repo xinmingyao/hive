@@ -244,6 +244,74 @@ function sdp.build_req(sdp)
   
 end
 
+function req_meta:is_bundle()
+   return true
+end
+function req_meta:is_rtcp_mux()
+   return true
+end
+
+--function req_meta:audio_ssrc()
+--   req_meta:ssrc("audio")
+--end
+
+local function get_fingerprint(attrs)
+   local i
+   for i in ipairs(attrs) do
+      local tmp = attrs[i]
+      if tmp:find("fingerprint") then
+	 print("sss",tmp)
+	 local codec = safe^1
+	 local finger = safe^1
+	 local ps = Ct(P"fingerprint:" * space_c(codec) * space_c(finger))
+	 local t = ps:match(tmp)
+	 if t then
+	    return {typ=t[1],fingerprint=t[2]}
+	 end
+      end
+   end
+   return nil
+end
+function req_meta:fingerprint()
+   local attrs = self.a
+   local finger = get_fingerprint(attrs)
+   if finger then
+      return finger
+   end
+   local ms = self.m
+   local media = ms[1]
+   return get_fingerprint(media.a)
+end
+function req_meta:ssrc(typ)
+   local m = self.m
+   local i
+   local media
+   for i in ipairs(m) do
+      if m[i].m.media == typ then
+	 media = m[i]
+	 break
+      end
+   end
+   if not media then 
+      return false,"no media"
+   end
+   local attrs = media.a
+   for i in ipairs(attrs) do
+      local tmp = attrs[i]
+      if tmp:find("ssrc") then
+	 local value = (safe - P":") ^1
+	 local key = (safe - P":") ^1
+	 local pair = Cg(space_c(key) * P":" * space_c(value))
+	 local ps  = Cf(Ct("") *pair^1,rawset)
+	 local t = ps:match(tmp)
+	 if  t then
+	    return t.ssrc
+	 end
+      end
+   end
+   return false,"no ssrc"
+end
+
 function sdp.parse(bin)
    assert(bin and type(bin)=="string")
    local req = session_description:match(bin)
@@ -326,13 +394,18 @@ function sdp.bnf_test()
       "c=IN IP6 127.0.0.1\r\n"..
       "b=AS:300\r\n"..
       "a=rtpmap:97 H264/90000\r\n"..
-      "a=aesid:201\r\n"
+      "a=aesid:201\r\n"..
+      "a=ssrc:1023 cname:hello\r\n"..
+      "a=ssrc:1023 mslable:hello\r\n"
 
    assert(att_value:match("mpeg4-esid"))
    local media2 = "m=audio 22 qq 97\r\n"..
       "b=AS:300\r\n"..
       "a=rtpmap:97 H264/90000\r\n"..
       "a=mpeg4esid:201\r\n"..
+      "a=ssrc:1023 cname:hello\r\n"..
+      "a=ssrc:1023 mslable:hello\r\n"..
+      "a=fingerprint:sha-256 12:34:56\r\n"..
       "m=vedio 0 qq 97\r\n"..
       "b=AS:300\r\n"..
       "a=rtpmap:97 H264/90000\r\n"..
@@ -381,11 +454,16 @@ function sdp.bnf_test()
    assert(st.m[2].m.media == "vedio")
    
    print("xxxxx",#(st.m[1].a))
-   return st
+   return setmetatable(st,{__index = req_meta})
 end
-
-local t =sdp.bnf_test()
-local t1 = sdp.build_req(t)
-print(t1)
+local debug = true 
+if debug then
+   local t =sdp.bnf_test()
+   local t1 = sdp.build_req(t)
+   print("sdp:test",t1)
+   print("sdp test:xxx",t:ssrc("audio"))
+   print("sdp test:xxx",t:ssrc("audio"))
+   print("sdp test:finger",t:fingerprint().typ,t:fingerprint().fingerprint)
+end
 --sdp.test1()
 return sdp
