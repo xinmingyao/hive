@@ -3,8 +3,6 @@ local bit = require "bit32"
 local math = require "math"
 local srtp = require "lua_srtp"
 local sdp = require "protocol.sdp"
-local peer = {}
-local peer_meta  = {}
 
 function peer_meta:offer()   
    return cell.call(self.pid,"start","controlling")
@@ -14,7 +12,7 @@ function peer_meta:answer(remote_info)
    return cell.call(self.pid,"start","controlled")
 end
 
-function peer_meta:set_remotes(RemoteSdp,Candis)
+function peer_meta:set_remotes(RemoteSdp,CandisJson)
    local sdp_info = sdp.parse(RemoteSdp)
    if not sdp_info then
       return false,"sdp not ok"
@@ -23,34 +21,43 @@ function peer_meta:set_remotes(RemoteSdp,Candis)
    local video_ssrc = sdp_info:ssrc("video")
    --local candis = sdp_info:candis("audio")
    local is_bundle = sdp_info:is_bundle()
-   local is_rtcp_mux = sdp_info:is_rtcp_mux()
+   local is_rtcp_mux = sdp_info:is_rtcp_mux()   
+   self.local_sdp_info.is_bundle = is_bundle
+   self.is_rtcp_mux = is_rtcp_mux
    
-   local ok,local_streams = cell.call(self.pid,"start","controlling")
+   local streams_info =
+      {
+	 {sid=1,
+	  components = {
+	     {
+		cid=1,user=self.opts.user,pwd=self.opts.pwd,port=self.opts.port,ip=self.opts.ip
+	     }
+	  }
+	 }
+      }
+   local ok,local_streams = cell.call(self.pid,"start","controlling",streams_info)
    if not ok then
       return false ,"start error"
    end
-   local ok,r = cell.call(self.pid,"set_remotes_candis",Candis)
-   if ok then
-      local local_sdp = {}
-      self.local_sdp = local_sdp
-      local_sdp.audio_ssrc = audio_ssrc
-      local_sdp.video_ssrc = video_ssrc
-      local_sdp.is_bundle = is_bundle
-      local_sdp.is_rtcp_mux = is_rtcp_mux
-      local info = {}
-      table.insert(info,"v=0")
-      table.insert(info,"o=test 931665148 2 IN IP4 192.0.0.1")
-      table.insert(info,"s=-")
-      table.insert(info,"t=0 0")
-      return true
-   else
-      return false
-   end
+   self.local_sdp_info.candidates = local_streams[1].locals
+   self.remote_sdp = sdp_info
+   local user,pwd
+   user = local_streams[1].locals[1].user
+   pwd = local_streams[1].locals[1].pwd
+   local ok,audio,video = sdp.get_remotes(CandisJson,user,pwd,is_rtcp_mux)
+   assert(ok)
+   local remote_stream= {}
+   remote_stream[1].locals = audio
+   cell.timeout(0,function()
+		   cell.call(self.pid,"set_remotes",remote_stream)
+   end)
+   
 end
 
 function peer_meta:get_local_sdp()
-   return self.sdp_info
+   return self.local_sdp_info:get_sdp()
 end
+
 function peer_meta:send(sid,cid,msg,sz)
    local pid = self.pid
    if self.dtls then
@@ -85,20 +92,23 @@ function peer.new(...)
    local user = "user"
    local pwd = "pwd"
    local ip = "192.168.203.157"
-   local bundle = true
-   local rtcp_mux = true
-   -- only support bundle
-   local streams_info =
-      {
-	 {sid=1,
-	  components = {
-	     {
-		cid=1,user=user,pwd=pwd,port=port,ip=ip
-	     }
-	  }
-	 }
-      }
+   
+   
    assert(type(opts)=="table")
+   if opts.user == nil then
+      opts.user = "test_user"
+   end
+   
+   if opts.pwd == nil then
+      opts.pwd = "test_pwd" --todo fix random_key
+   end
+   
+   if opts.ip == nil then
+      opts.ip = ip
+   end
+   if opts.port == nil then
+      opts.port = 7000 --todo fix get from port_manager
+   end
    local cfg = {
       protocol = "dtlsv1",
       key = "./certs/server/key.pem",
@@ -120,7 +130,9 @@ function peer.new(...)
       p.ssrc = ssrc
    end
    cell.add_message("ice_receive",ice_receive)
-   local p = {s=streams,stun=stun_sever,opts=opts}
+   local local_sdp_info = sdp.new_sdp_info()
+   local p = {s=streams,stun=stun_sever,opts=opts,local_sdp_info=local_sdp_info}
+
    local pid = cell.cmd("launch", "p2p.ice_agent_full",streams_info,stun_servers,opts)
    p.pid = pid
    return setmetatable(p,{__index = peer_meta})

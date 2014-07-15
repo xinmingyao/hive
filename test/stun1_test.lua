@@ -30,12 +30,13 @@ function cell.main(msg,gui)
    req:add_attr('ICE_CONTROLLED',3)
    req:add_attr('ICE_CONTROLLING',4)
    req:add_attr('XOR_MAPPED_ADDRESS',{ip="192.168.203.1",port=8080})
-   local key = "test"
+   local key = "pwd1"
    req.fingerprint = true
    req.key = key
    local data = req:encode()
    local sz,msg = csocket.sendpack(data)
    local ok,req2 = stun.decode(msg,sz,key)
+   print(ok,req2)
    assert(true==ok)
    assert(9==req2.tx_id)
    print(req2.attrs['PRIORITY'])

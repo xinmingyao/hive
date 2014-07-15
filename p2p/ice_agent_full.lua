@@ -29,6 +29,7 @@ local ta = 20 -- timeout for gather and check
 local max_count = 3 -- max timeout
 local que_meta = {} 
 local peer_pwd 
+local local_pwd
 local seqno = math.random(0,bit.lshift(2,16))
 local function get_seq()
    local old = seqno
@@ -350,7 +351,7 @@ local function do_send_check(pair,tid)
    else
       req:add_attr('ICE_CONTROLLED',tie_break)
    end
-   req.key = peer_pwd
+   req.key = local_pwd
    local data = req:encode()
    local socket = pair.l.socket
    socket:write(data,pair.r.addr.ip,pair.r.addr.port)
@@ -1018,8 +1019,10 @@ cell.message {
       local pos,b1 = bin.unpack(">C",msg,sz)
       if b1 == 0x16 then --dtls
       elseif (state=="running" or state=="gather") and bit.rshift(b1,6) == 0x0 then
-	 print(state,sz)
-	 local ok,req = stun.decode(msg,sz)
+	 print(state,sz,peer_pwd)
+	 local ok,req = stun.decode(msg,sz,peer_pwd)
+	 print(ok,req)
+	 assert(ok)
 	 if states[state] then
 	    states[state](req,fd,peer_ip,peer_port)
 	 end
@@ -1055,7 +1058,12 @@ cell.message {
 
 cell.command {
    start = function(...)
-      role = ...
+      local s_info
+      role,s_info = ...
+      if s_info then
+	 streams_info = s_info
+      end
+      local_pwd = streams_info[1].components[1].pwd
       state = "gather"
       build_host()
       start_gather()

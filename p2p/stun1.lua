@@ -351,7 +351,7 @@ function stun.decode(data,sz,key)
       if finger == 0x8028 then
 	 local crc1 = bit32.bxor(crc32.hash(msg),0x5354554e)
 	 if crc1 ~= crc then
-	    return false
+	    return false,"crc error"
 	 end
 	 req.fingerprint = true
       else
@@ -372,7 +372,7 @@ function stun.decode(data,sz,key)
 	 sz1 = sz
       end
       if sz1 < 20 + 24 then
-	 return false
+	 --return false,"integrity error"
       end
       local f1,s1,l1
       local first,second,last
@@ -398,10 +398,10 @@ function stun.decode(data,sz,key)
 	 if digest1 == digest then
 	    req.integrity = true
 	 else
-	    return false
+	    return false,"fingerprint error"
 	 end
       else
-	 return false
+	 return false,"fingerprint data error"
       end
    end
    local pos,s_type,len,magic_cookie,tmp,tx_id = bin.unpack(">SSIIL",data,sz)
