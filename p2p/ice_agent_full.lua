@@ -342,7 +342,7 @@ local function do_send_check(pair,tid)
    local req = stun.new("request","binding",tid)
    req:add_attr('PRIORITY',priority)
    req:add_attr('USERNAME',pair.r.user ..":".. pair.l.user)
-   req:add_attr('PASSWORD',pair.r.pwd)
+  -- req:add_attr('PASSWORD',pair.r.pwd)
    if role == "controlling" then
       if pair.is_nominate then
 	 req:add_attr('USE_CANDIDATE',1)
@@ -617,6 +617,7 @@ local function do_running(req,fd,peer_ip,peer_port)
       if conflict then
 	 local rep = stun.new('error','binding',req.tx_id)
 	 rep:add_attr('ERROR-CODE',{number=487,reason="role conflict",reserve=0,class=0})
+	 rep.key = local_pwd
 	 local data = rep:encode()
 	 socket:write(data,peer_ip,peer_port)
 	 return	 
@@ -630,6 +631,7 @@ local function do_running(req,fd,peer_ip,peer_port)
       local priority = req:get_addr_value('PRIORITY',priority)
       rep:add_attr('XOR_MAPPED_ADDRESS',{ip=peer_ip,port=peer_port})
       rep:add_attr('PRIORITY',priority)
+      rep.key = local_pwd
       local data = rep:encode()
       socket:write(data,peer_ip,peer_port)
       -- find peer flex
@@ -1017,12 +1019,16 @@ cell.message {
    accept_udp = function(fd,msg,sz,peer_ip,peer_port)
       --todo peek msg
       local pos,b1 = bin.unpack(">C",msg,sz)
+      if sz < 0 then return end
       if b1 == 0x16 then --dtls
       elseif (state=="running" or state=="gather") and bit.rshift(b1,6) == 0x0 then
 	 print(state,sz,peer_pwd)
 	 local ok,req = stun.decode(msg,sz,peer_pwd)
-	 print(ok,req)
-	 assert(ok)
+	 if not ok then
+	    print(req)
+	    return
+	 end
+	 
 	 if states[state] then
 	    states[state](req,fd,peer_ip,peer_port)
 	 end

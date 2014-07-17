@@ -4,16 +4,19 @@ local math = require "math"
 local srtp = require "lua_srtp"
 local sdp = require "protocol.sdp"
 
+local peer_meta = {}
+local peer = {}
 function peer_meta:offer()   
    return cell.call(self.pid,"start","controlling")
 end
 
-function peer_meta:answer(remote_info)
-   return cell.call(self.pid,"start","controlled")
-end
 
-function peer_meta:set_remotes(RemoteSdp,CandisJson)
+function peer_meta:answer(RemoteSdp,CandisStr)
+   print("answer:",RemoteSdp)
+   --local file = io.open("./test/1.sdp","w")
+   --file:write(RemoteSdp)
    local sdp_info = sdp.parse(RemoteSdp)
+   print(sdp_info)
    if not sdp_info then
       return false,"sdp not ok"
    end
@@ -44,7 +47,7 @@ function peer_meta:set_remotes(RemoteSdp,CandisJson)
    local user,pwd
    user = local_streams[1].locals[1].user
    pwd = local_streams[1].locals[1].pwd
-   local ok,audio,video = sdp.get_remotes(CandisJson,user,pwd,is_rtcp_mux)
+   local ok,audio,video = sdp.get_remotes(CandisStr,user,pwd,is_rtcp_mux)
    assert(ok)
    local remote_stream= {}
    remote_stream[1].locals = audio
@@ -118,6 +121,7 @@ function peer.new(...)
       options = {"all", "no_sslv2"}
    }
    if opts.cfg == nil then
+      opts.dtls=true
       opts.cfg = cfg
    end
    opts.client = cell.self
@@ -126,13 +130,12 @@ function peer.new(...)
       if not opts.ssrc then
 	 ssrc = math.random(1,bit.lshift(1,20))
       end
-      p.seq = 1
-      p.ssrc = ssrc
    end
    cell.add_message("ice_receive",ice_receive)
    local local_sdp_info = sdp.new_sdp_info()
    local p = {s=streams,stun=stun_sever,opts=opts,local_sdp_info=local_sdp_info}
-
+   p.seq = 1
+   p.ssrc = ssrc
    local pid = cell.cmd("launch", "p2p.ice_agent_full",streams_info,stun_servers,opts)
    p.pid = pid
    return setmetatable(p,{__index = peer_meta})

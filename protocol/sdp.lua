@@ -48,10 +48,10 @@ local decimal_uchar = C(
 local byte = P(1) - S("\0\r\n") 
 local byte_string =  byte^1--P"0x" * l.xdigit * l.xdigit
 local text = safe^1
-local b1 = decimal_uchar - P'0' -- -P'127'
-local b4 = decimal_uchar - P'0'
+local b1 = decimal_uchar -- - P'0' -- -P'127'
+local b4 = decimal_uchar -- - P'0'
 local ip4_address = b1 * P'.' * decimal_uchar * P'.' * decimal_uchar * P'.' * b4 
-local unicast_address = ip4_address
+local unicast_address = ip4_address 
 local fqdn1 = alnum + S("-.")
 local fqdn = fqdn1 * fqdn1 * fqdn1 * fqdn1
 local addr =  unicast_address  + fqdn
@@ -102,6 +102,7 @@ local o_field = space_cg(username,"username")
    * space_cg(addr,"addr")
 local origin_field =  P"o=" * Cg(Ct(o_field) * crlf,"o") 
 local session_name_field = P"s=" *Cg(space_c(text) * crlf,"s")
+local t_field = P"t=" *Cg(Ct(space_c(text)^1) * crlf,"t")
 local information_field = P"i=" *Cg(space_c(text) * crlf,"i")
 local uri_field = P"u=" *Cg(space_c(uri) * crlf,"u")
 local email_field = P"e=" *space_c(email) * crlf
@@ -118,7 +119,7 @@ local bandwidth_fields = Cg(Ct(bandwidth_field^1),"b")
 local time_field = P"t=" * Cg(space_c(any) * crlf,"t") --todo detail
 
 local key_field = P"k=" *Cg(space_c(text) * crlf,"k") --todo detail
-local media_field = P"m=" * space_cg(media,"media") * (space_cg(port/tonumber,"port")*(P"/" * integer)^-1) * space_cg(proto,"proto") * space_cg(fmt,"fmt")^-1 * crlf,"m"
+local media_field = P"m=" * space_cg(media,"media") * (space_cg(port/tonumber,"port")*(P"/" * integer)^-1) * space_cg(proto,"proto") * space_cg(Ct(space_c(fmt)^1),"fmt") * crlf,"m"
 
 local attribute_field = P"a=" * C(attribute) * crlf
 local attribute_fields = Cg(Ct(attribute_field ^1),"a")
@@ -130,7 +131,7 @@ local media_description =
    Cg(Ct(media_field),"m")  
    * Cg(information_field2^-1,"i")
    * Cg(Ct(connection_field2^0),"c")
-   * Cg(Ct(bandwidth_field^1),"b")
+   * Cg(Ct(bandwidth_field^-1),"b")
    * Cg(key_field2^-1,"k")
    * Cg(Ct(attribute_field^1),"a")
 local media_descriptions = Ct(Cg(Ct(Ct(media_description)^1),"m")) --Cg(Ct(media_description^1),"m")
@@ -141,15 +142,36 @@ local session_description =
       proto_version
 	 * origin_field
 	 * session_name_field
+         * t_field^-1
 	 * information_field^-1
 	 * uri_field^-1
 	 * email_field^-1
 	 * connection_field^-1
-	 * bandwidth_fields
+	 * bandwidth_fields^-1
 	 * attribute_fields
-	 * media_descriptions2
+	 * media_descriptions2 
    )
+----[[
+local t = ""..
+"v=0\r\n"..
+"o=- 1421883026779795610 2 IN IP4 127.0.0.1\r\n"..
+"s=-\r\n"..
+"t=0 0\r\n"..
+"a=group:BUNDLE\r\n"..
+"m=audio 0 RTP/AVP 96 20\r\n"..
+"c=IN IP4 0.0.0.0\r\n"..
+"a=send:aa\r\n"
 
+ t1 ="m=audio 0 RTP/AVP 96\r\n"..
+      "a=rtpmap:97 H264/90000\r\n"..
+      "a=aesid:201\r\n"..
+      "a=ssrc:1023 cname:hello\r\n"..
+   "a=ssrc:1023 mslable:hello\r\n"
+
+--print(C(media_description):match("m=audio 0 RTP/AVP 96\r\n"))
+--"m=audio 1 RTP/SAVPF 111 103 104 0 8 106 105 13 126\r\n"
+print("xxxxxxxxxxx",session_description:match(t))
+----]]
 local req_meta = {}
 local build_field
 build_field = {
@@ -316,7 +338,7 @@ function sdp.parse(bin)
    assert(bin and type(bin)=="string")
    local req = session_description:match(bin)
    if not req then
-      return false
+      return false,"not valid sdp"
    end
    return setmetatable(req,{__index = req_meta})
 end
@@ -326,9 +348,9 @@ function sdp.bnf_test()
    assert(decimal_uchar:match(du1))
    assert(byte_string:match("0x12"))
    --assert(not ip4_address:match("127.0.0.1"))
-   assert(not ip4_address:match("127.0.0.0"))
+   assert(not ip4_address:match("a.0.0.0"))
    assert(not ip4_address:match("127.0.0"))
-   assert(ip4_address:match("126.0.0.1"))
+   assert(ip4_address:match("0.0.0.0"))
    assert(ip4_address:match("192.168.0.1"))
    assert(fqdn:match("a-b.2"))
    assert(phone:match("+2-2b"))
@@ -343,6 +365,8 @@ function sdp.bnf_test()
 
    assert(connection_address:match("192.168.2.5"))
    assert(attribute:match("aa:33"))
+   assert(attribute:match("group:BUNDDLE video audio"))
+   assert(attribute:match("msid-semetic: WMS"))
    local m = "m=audio 0 RTP/AVP 96\r\n"
    assert(media_field:match(m),"media fail")
    local m1 = Ct(media_field)
@@ -456,7 +480,62 @@ function sdp.bnf_test()
    print("xxxxx",#(st.m[1].a))
    return setmetatable(st,{__index = req_meta})
 end
-local debug = true 
+function parse_test()
+   local sdp =[[
+v=0
+o=- 1421883026779795610 2 IN IP4 127.0.0.1
+s=-
+t=0 0
+a=group:BUNDLE audio video
+a=msid-semantic: WMS
+m=audio 1 RTP/SAVPF 111 103 104 0 8 106 105 13 126
+c=IN IP4 0.0.0.0
+a=rtcp:1 IN IP4 0.0.0.0
+a=ice-ufrag:S+KKU7zeZD52BD9a
+a=ice-pwd:QynIQR9E4BJuIlSckY7JPRBP
+a=ice-options:google-ice
+a=fingerprint:sha-256 B9:DF:70:CC:7D:A1:71:10:3E:4B:66:50:7C:25:38:E6:14:EC:AA:74:A6:73:FE:BE:A0:AB:56:5C:F8:36:5C:50
+a=setup:actpass
+a=mid:audio
+a=extmap:1 urn:ietf:params:rtp-hdrext:ssrc-audio-level
+a=recvonly
+a=rtcp-mux
+a=crypto:1 AES_CM_128_HMAC_SHA1_80 inline:WZ/+eA1aV6JmsJOJyROSun/2H94tlyGrJUHtXYBi
+a=rtpmap:111 opus/48000/2
+a=fmtp:111 minptime=10
+a=rtpmap:103 ISAC/16000
+a=rtpmap:104 ISAC/32000
+a=rtpmap:0 PCMU/8000
+a=rtpmap:8 PCMA/8000
+a=rtpmap:106 CN/32000
+a=rtpmap:105 CN/16000
+a=rtpmap:13 CN/8000
+a=rtpmap:126 telephone-event/8000
+a=maxptime:60
+m=video 1 RTP/SAVPF 100 116 117
+c=IN IP4 0.0.0.0
+a=rtcp:1 IN IP4 0.0.0.0
+a=ice-ufrag:S+KKU7zeZD52BD9a
+a=ice-pwd:QynIQR9E4BJuIlSckY7JPRBP
+a=ice-options:google-ice
+a=fingerprint:sha-256 B9:DF:70:CC:7D:A1:71:10:3E:4B:66:50:7C:25:38:E6:14:EC:AA:74:A6:73:FE:BE:A0:AB:56:5C:F8:36:5C:50
+a=setup:actpass
+a=mid:video
+a=extmap:2 urn:ietf:params:rtp-hdrext:toffset
+a=extmap:3 http://www.webrtc.org/experiments/rtp-hdrext/abs-send-time
+a=recvonly
+a=rtcp-mux
+a=crypto:1 AES_CM_128_HMAC_SHA1_80 inline:WZ/+eA1aV6JmsJOJyROSun/2H94tlyGrJUHtXYBi
+a=rtpmap:100 VP8/90000
+a=rtcp-fb:100 ccm fir
+a=rtcp-fb:100 nack
+a=rtcp-fb:100 nack pli
+a=rtcp-fb:100 goog-remb
+a=rtpmap:116 red/90000
+a=rtpmap:117 ulpfec/90000
+]]
+end
+local debug = false
 if debug then
    local t =sdp.bnf_test()
    local t1 = sdp.build_req(t)
@@ -499,19 +578,20 @@ local function random_key(len)
    end
 end
 local sdp_M ={}
-
---{type="CANDIDATE_TYPE_SERVER_REFLEXIVE",
---		 transport = "udp",
---		 addr = {ip=ip,port=port},
---		 base_addr = {ip = host.addr.ip,port= host.addr.port},
---		 cid = host.cid,
---		 sid = host.sid,
---		 user = host.user,
---		 priority = compute_candidate_priority("CANDIDATE_TYPE_SERVER_REFLEXIVE",host.cid),
---		 pwd = host.pwd,
---		 stun_ip = gather.stun_ip,
---		 stun_port = gather.stun_port
---      }
+--[[
+   {type="CANDIDATE_TYPE_SERVER_REFLEXIVE",
+   transport = "udp",
+   addr = {ip=ip,port=port},
+   base_addr = {ip = host.addr.ip,port= host.addr.port},
+   cid = host.cid,
+   sid = host.sid,
+   user = host.user,
+   priority = compute_candidate_priority("CANDIDATE_TYPE_SERVER_REFLEXIVE",host.cid),
+   pwd = host.pwd,
+   stun_ip = gather.stun_ip,
+   stun_port = gather.stun_port
+   }
+--]]
 
 local typ_str = {
       CANDIDATE_TYPE_HOST = "host",
@@ -525,11 +605,11 @@ for k,v in pairs(typ_str) do
 end
 local json = require "cjson"
 function sdp.get_remotes(Jsons,user,pwd,is_rtcp_mux)
-   local i
+   local i,v
    local audio,video = {},{}
-   for i in ipairs(Jsons) do
-      local t = json.decode(Jsons[i])
-      local candi = t.candidate
+   for i,v in ipairs(Jsons) do
+      --local t = json.decode(Jsons[i])
+      local candi = v
       local elem = safe^1
       local elems = space_c(elem)^1
       local cp = Ct(P"a=candidate:" * elems * "\r\n")
@@ -582,6 +662,7 @@ function sdp_M:get_sdp()
    local tbl ={}
    local info = self
    local msid = uuid.new()
+   local audio_candis,Video_candis = {},{}
    info.msid = msid
    table.insert(tbl,"v=0")
    table.insert(tbl,"o=- 0 0 IN IP4 127.0.0.1")
@@ -626,7 +707,8 @@ function sdp_M:get_sdp()
 	 cstr = cstr .. string.format(" raddr %s rport %d",candi.base_addr.ip,candi.base_addr.port)
       end
       cstr = cstr .. "generation 0"
-      table.insert(tbl,cstr)
+      table.insert(audio_candis,cstr)
+      --table.insert(tbl,cstr)
    end
    table.insert(tbl,"a=fingerprint:sha-256 "..info.fingerprint)
    table.insert(tbl,"a=sendrecv")
@@ -693,7 +775,8 @@ function sdp_M:get_sdp()
 	 cstr = cstr .. string.format(" raddr %s rport %d",candi.base_addr.ip,candi.base_addr.port)
       end
       cstr = cstr .. "generation 0"
-      table.insert(tbl,cstr)
+      table.insert(vedio_candis,cstr)
+      --table.insert(tbl,cstr)
    end
    table.insert(tbl,"a=fingerprint:sha-256 "..info.fingerprint)
    table.insert(tbl,"a=sendrecv")
@@ -727,7 +810,7 @@ function sdp_M:get_sdp()
    table.insert(tbl,string.format("a=ssrc:%d label:%d",audio_ssrc,msid))
 
 
-   return table.concat(tbl,"\n")
+   return table.concat(tbl,"\r\n"),audio_candis,Video_candis
 end
 
 

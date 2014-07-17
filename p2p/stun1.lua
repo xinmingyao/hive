@@ -372,7 +372,7 @@ function stun.decode(data,sz,key)
 	 sz1 = sz
       end
       if sz1 < 20 + 24 then
-	 --return false,"integrity error"
+	 return false,"integrity error"
       end
       local f1,s1,l1
       local first,second,last
