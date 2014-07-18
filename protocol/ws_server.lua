@@ -112,8 +112,8 @@ function _M.new(fd,handle,opts)
       id = 6, -- socket
       replace = true,
       dispatch = function(fd,sz, msg,...)
-	 cell.push(fd,msg,sz)
 	 local co = coroutine.create(function()
+					cell.push(fd,msg,sz)
 					--print(t1:recv_frame())
 					local data ,typ,err = t1:recv_frame()
 					handle[typ](data)

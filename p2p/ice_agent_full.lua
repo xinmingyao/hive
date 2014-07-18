@@ -25,7 +25,7 @@ local candi_id = 1
 local pair_id = 1
 local tx_id = 1
 local pair_id = 1
-local ta = 20 -- timeout for gather and check
+local ta = 2000 -- timeout for gather and check
 local max_count = 3 -- max timeout
 local que_meta = {} 
 local peer_pwd 
@@ -306,6 +306,7 @@ local function is_gather_complete()
    end
    state = "running"
    do_gather_complete()
+   print("11111:",start_ev)
    cell.wakeup(start_ev)
 end
 
@@ -1074,7 +1075,9 @@ cell.command {
       build_host()
       start_gather()
       start_ev = cell.event()
+      print(222222222)
       cell.wait(start_ev)
+      print("3333:",start_ev)
       return true,local_streams
    end,
    set_remotes = function(...)
@@ -1094,5 +1097,6 @@ cell.command {
 }
 function cell.main(...)
    streams_info,stun_servers,opts = ...
+   cell.register_monitor()
    return true
 end

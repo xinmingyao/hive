@@ -306,11 +306,12 @@ function req_meta:fingerprint()
 end
 function req_meta:ssrc(typ)
    local m = self.m
-   local i
+   local i,v
    local media
-   for i in ipairs(m) do
-      if m[i].m.media == typ then
-	 media = m[i]
+  
+   for i,v in ipairs(m) do
+      if v.m.media == typ then
+	 media = v
 	 break
       end
    end
@@ -318,20 +319,24 @@ function req_meta:ssrc(typ)
       return false,"no media"
    end
    local attrs = media.a
+   local ssrcs = {}
    for i in ipairs(attrs) do
       local tmp = attrs[i]
-      if tmp:find("ssrc") then
+      if tmp:find("ssrc:") then
+	 print(tmp)
 	 local value = (safe - P":") ^1
 	 local key = (safe - P":") ^1
 	 local pair = Cg(space_c(key) * P":" * space_c(value))
 	 local ps  = Cf(Ct("") *pair^1,rawset)
 	 local t = ps:match(tmp)
 	 if  t then
-	    return t.ssrc
+--	    local p2 = Ct(space_c(safe^1) * ps)
+	    t.str = tmp
+	    table.insert(ssrcs,t)
 	 end
       end
    end
-   return false,"no ssrc"
+   return ssrcs
 end
 
 function sdp.parse(bin)

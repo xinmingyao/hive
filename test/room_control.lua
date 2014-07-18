@@ -21,21 +21,22 @@ cell.command {
 
 local  handle = {
    text = function(msg)
-      --print("receive:",msg)
+      print("receive:",msg)
       local m = json.decode(msg)
       local cmd = m.type
       if cmd == "offer" then
 	 local sdp1 = sdp.parse(m.sdp)
-	 print(sdp1:ssrc("audio"))
+	 --print(sdp1:ssrc("audio"))
 	 print(sdp1:is_bundle())
-	 peer_sdp = m.sdp
+	 peer_sdp = sdp1
       elseif cmd == "add_candidate" then
 	 local t1 = m.candidate
 	 if t1:find("udp") then
 	    table.insert(peer_candis,m)
 	 end
       elseif cmd == "start" then
-	 webrtc:answer(peer_sdp,peer_candis)
+	 print("start-----")
+	 print(webrtc:answer(peer_sdp,peer_candis))
 	 local local_sdp,audio_candis,vedio_candis=webrtc:get_local_sdp()
 	 local rep
 	 local tmp1 = {}

@@ -11,15 +11,12 @@ function peer_meta:offer()
 end
 
 
-function peer_meta:answer(RemoteSdp,CandisStr)
-   print("answer:",RemoteSdp)
+function peer_meta:answer(sdp_info,CandisStr)
+
    --local file = io.open("./test/1.sdp","w")
    --file:write(RemoteSdp)
-   local sdp_info = sdp.parse(RemoteSdp)
-   print(sdp_info)
-   if not sdp_info then
-      return false,"sdp not ok"
-   end
+--   local sdp_info = sdp.parse(RemoteSdp)
+   assert(sdp_info)
    local audio_ssrc = sdp_info:ssrc("audio")
    local video_ssrc = sdp_info:ssrc("video")
    --local candis = sdp_info:candis("audio")
@@ -38,7 +35,9 @@ function peer_meta:answer(RemoteSdp,CandisStr)
 	  }
 	 }
       }
+   print("vvvvvvvvvvvvvvvv")
    local ok,local_streams = cell.call(self.pid,"start","controlling",streams_info)
+   print("xxxx=============",ok)
    if not ok then
       return false ,"start error"
    end
@@ -48,6 +47,7 @@ function peer_meta:answer(RemoteSdp,CandisStr)
    user = local_streams[1].locals[1].user
    pwd = local_streams[1].locals[1].pwd
    local ok,audio,video = sdp.get_remotes(CandisStr,user,pwd,is_rtcp_mux)
+   print("----------",ok)
    assert(ok)
    local remote_stream= {}
    remote_stream[1].locals = audio
@@ -138,6 +138,7 @@ function peer.new(...)
    p.ssrc = ssrc
    local pid = cell.cmd("launch", "p2p.ice_agent_full",streams_info,stun_servers,opts)
    p.pid = pid
+   print("monitor",cell.monitor(pid))
    return setmetatable(p,{__index = peer_meta})
 end
 return peer
