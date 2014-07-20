@@ -282,7 +282,6 @@ local function get_fingerprint(attrs)
    for i in ipairs(attrs) do
       local tmp = attrs[i]
       if tmp:find("fingerprint") then
-	 print("sss",tmp)
 	 local codec = safe^1
 	 local finger = safe^1
 	 local ps = Ct(P"fingerprint:" * space_c(codec) * space_c(finger))
@@ -294,6 +293,28 @@ local function get_fingerprint(attrs)
    end
    return nil
 end
+
+function req_meta:ice_info()
+   local audio = self.m[1]
+   local attrs = audio.a
+   local i,v
+   local ice = {}
+   local ice_key = {
+      ["ice%-ufrag"] = "user",
+      ["ice%-pwd"] = "pwd",
+      ["ice%-options"] = "opt",
+   }
+   for i,v in ipairs(attrs) do
+      local k1,v1
+      for k1,v1 in pairs(ice_key) do
+	 if v:find(k1) then
+	    ice[v1] = v:sub(k1:len()+1)
+	 end
+      end
+   end
+   return ice
+end
+
 function req_meta:fingerprint()
    local attrs = self.a
    local finger = get_fingerprint(attrs)
@@ -614,7 +635,7 @@ function sdp.get_remotes(Jsons,user,pwd,is_rtcp_mux)
    local audio,video = {},{}
    for i,v in ipairs(Jsons) do
       --local t = json.decode(Jsons[i])
-      local candi = v
+      local candi = v.candidate
       local elem = safe^1
       local elems = space_c(elem)^1
       local cp = Ct(P"a=candidate:" * elems * "\r\n")
@@ -622,35 +643,36 @@ function sdp.get_remotes(Jsons,user,pwd,is_rtcp_mux)
       assert(t2,"candies str not valied")
       local typ = typ_str[t2[8]]
       local c1 =  {
-	 fid = t[1],
+	 fid = t2[1],
 	 type = typ,
 	 transport = "udp", --t2[3]
-	 addr = {ip=t[5],port=tonumber(t[6])},
-	 base_addr = {ip = host.addr.ip,port= host.addr.port},
-	 cid = t[2],
+	 addr = {ip=t2[5],port=tonumber(t2[6])},
+	 cid = tonumber(t2[2]),
 	 sid = 1,
 	 user = user,
-	 priority = t[4],
+	 priority = tonumber(t2[4]),
 	 pwd = pwd
       }
       if t2[8] ~= "host" then
-	 c1.base_addr.ip= t2[11]
-	 c1.base_addr.port = t2[13]
+	 c1.base_addr = {ip= t2[10],port = t2[12]}
+      else
+	 c1.base_addr= {ip= t2[5],port = t2[6]}
       end
       
+      print("xxx",candi)
       if is_rtcp_mux then
 	 if t2[2] == "1" then
-	    if t.sdpMid == "audio" then
+	    if v.sdpMid == "audio" then
 	       table.insert(audio,c1)
 	    else
-	       table.insert(vedio,c1)
+	       table.insert(video,c1)
 	    end
 	 end
       else
-	 if t.sdpMid == "audio" then
+	 if v.sdpMid == "audio" then
 	    table.insert(audio,c1)
 	 else
-	    table.insert(vedio,c1)
+	    table.insert(video,c1)
 	 end
       end
    end
@@ -663,11 +685,12 @@ function sdp.get_remotes(Jsons,user,pwd,is_rtcp_mux)
    end)
    return true,audio,video
 end       
-function sdp_M:get_sdp()
+function sdp_M:get_sdp(fingerprint)
    local tbl ={}
    local info = self
    local msid = uuid.new()
-   local audio_candis,Video_candis = {},{}
+   local label = uuid.new()
+   local audio_candis,video_candis = {},{}
    info.msid = msid
    table.insert(tbl,"v=0")
    table.insert(tbl,"o=- 0 0 IN IP4 127.0.0.1")
@@ -686,18 +709,19 @@ function sdp_M:get_sdp()
    local str = "m=audio %d RTP/SAVPF %s"   
    local payloads = {} 
    for i in ipairs(info.payloads) do
-      table.insert(payloads,info.payloads[i].payload_type)
+      table.insert(payloads,rtp_def[info.payloads[i].payload_type])
    end
    payloads = table.concat(payloads," ")
-   table.insert(tbl,string.format(str,port,payloads))
+--   table.insert(tbl,string.format(str,1,payloads))
+   table.insert(tbl,"m=audio 1 RTP/SAVPF 0 126")
    table.insert(tbl,string.format("c=IN IP4 %s",ip))
-   if info.is_rtcp_mux then
+  -- if info.is_rtcp_mux then
       table.insert(tbl,string.format("a=rtcp:%d IN IP4 %s",port,ip))
-   end
+  -- end
    local user = candidates[1].user
    local pwd = candidates[1].pwd
    ip = candidates[1].addr.ip
-   port = candidate[1].addr.port
+   port = candidates[1].addr.port
    table.insert(tbl,"a=ice-ufrag:"..user)
    table.insert(tbl,"a=ice-pwd:"..pwd)
    for i in ipairs(candidates) do
@@ -708,15 +732,17 @@ function sdp_M:get_sdp()
       assert(host_typ_str)
       cstr = string.format(cstr,candi.fid,candi.cid,candi.transport,candi.priority,
 			   candi.addr.ip,candi.addr.port,host_typ_str)
-      if canid.type ~="CANDIDATE_TYPE_HOST" then
+      if candi.type ~="CANDIDATE_TYPE_HOST" then
 	 cstr = cstr .. string.format(" raddr %s rport %d",candi.base_addr.ip,candi.base_addr.port)
       end
-      cstr = cstr .. "generation 0"
+      cstr = cstr .. "  generation 0"
       table.insert(audio_candis,cstr)
       --table.insert(tbl,cstr)
    end
-   table.insert(tbl,"a=fingerprint:sha-256 "..info.fingerprint)
+   table.insert(tbl,"a=fingerprint:sha-256 "..fingerprint)
    table.insert(tbl,"a=sendrecv")
+   table.insert(tbl,"a=rtcp-mux")
+   table.insert(tbl,"a=setup:active")
    table.insert(tbl,"a=mid:audio")
    if info.is_rtcp_mux then
       table.insert(tbl,"a=rtcp-mux")
@@ -725,7 +751,7 @@ function sdp_M:get_sdp()
    for i in ipairs(info.payloads) do
       local srtp =""
       local rtp = info.payloads[i]
-      local typ = rtp_def[rtp.media_type]
+      local typ = rtp_def[rtp.payload_type]
       if rtp.media_type == 2 then --audio
 	 if rtp.channels >1 then
 	    srtp = string.format("a=rtpmap:%d %s/%d/%d",typ,rtp.encoding_name,rtp.clock_rate,rtp.channels)
@@ -744,10 +770,9 @@ function sdp_M:get_sdp()
    end
    table.insert(tbl,"a=maxptime:60")
    table.insert(tbl,string.format("a=ssrc:%d cname:o/i14u9pJrxRKAsu",audio_ssrc))
-   table.insert(tbl,string.format("a=ssrc:%d msid:%d",audio_ssrc,msid))
-   table.insert(tbl,string.format("a=ssrc:%d mslable:%d",audio_ssrc,msid))
-   table.insert(tbl,string.format("a=ssrc:%d label:%d",audio_ssrc,msid))
-
+   table.insert(tbl,string.format("a=ssrc:%d msid:%s %s",audio_ssrc,msid,label))
+   table.insert(tbl,string.format("a=ssrc:%d mslable:%s",audio_ssrc,msid))
+   table.insert(tbl,string.format("a=ssrc:%d label:%s",audio_ssrc,label))
 
 
 --video
@@ -756,14 +781,15 @@ function sdp_M:get_sdp()
    local str = "m=vedio %d RTP/SAVPF %s"   
    local payloads = {} 
    for i in ipairs(info.payloads) do
-      table.insert(payloads,info.payloads[i].payload_type)
+      table.insert(payloads,rtp_def[info.payloads[i].payload_type])
    end
    payloads = table.concat(payloads," ")
-   table.insert(tbl,string.format(str,port,payloads))
+   --table.insert(tbl,string.format(str,port,payloads))
+   table.insert(tbl,"m=video 1 RTP/SAVPF 100 116 117")
    table.insert(tbl,string.format("c=IN IP4 %s",ip))
-   if info.is_rtcp_mux then
+  -- if info.is_rtcp_mux then
       table.insert(tbl,string.format("a=rtcp:%d IN IP4 %s",port,ip))
-   end
+  -- end
    local user = candidates[1].user
    local pwd = candidates[1].pwd
    table.insert(tbl,"a=ice-ufrag:"..user)
@@ -776,15 +802,17 @@ function sdp_M:get_sdp()
       assert(host_typ_str)
       cstr = string.format(cstr,candi.fid,candi.cid,candi.transport,candi.priority,
 			   candi.addr.ip,candi.addr.port,host_typ_str)
-      if canid.type ~="CANDIDATE_TYPE_HOST" then
+      if candi.type ~="CANDIDATE_TYPE_HOST" then
 	 cstr = cstr .. string.format(" raddr %s rport %d",candi.base_addr.ip,candi.base_addr.port)
       end
-      cstr = cstr .. "generation 0"
-      table.insert(vedio_candis,cstr)
+      cstr = cstr .. " generation 0"
+      table.insert(video_candis,cstr)
       --table.insert(tbl,cstr)
    end
-   table.insert(tbl,"a=fingerprint:sha-256 "..info.fingerprint)
+   table.insert(tbl,"a=fingerprint:sha-256 "..fingerprint)
+   table.insert(tbl,"a=setup:active")
    table.insert(tbl,"a=sendrecv")
+   table.insert(tbl,"a=rtcp-mux")
    table.insert(tbl,"a=mid:video")
    if info.is_rtcp_mux then
       table.insert(tbl,"a=rtcp-mux")
@@ -793,7 +821,7 @@ function sdp_M:get_sdp()
    for i in ipairs(info.payloads) do
       local srtp =""
       local rtp = info.payloads[i]
-      local typ = rtp_def[rtp.media_type]
+      local typ = rtp_def[rtp.payload_type]
       if rtp.media_type == 1 then --vedio
 	 srtp = string.format("a=rtpmap:%d %s/%d",typ,rtp.encoding_name,rtp.clock_rate)
 	 table.insert(tbl,srtp)
@@ -810,12 +838,11 @@ function sdp_M:get_sdp()
    end
    table.insert(tbl,"a=maxptime:60")
    table.insert(tbl,string.format("a=ssrc:%d cname:o/i14u9pJrxRKAsu",audio_ssrc))
-   table.insert(tbl,string.format("a=ssrc:%d msid:%d",audio_ssrc,msid))
-   table.insert(tbl,string.format("a=ssrc:%d mslable:%d",audio_ssrc,msid))
-   table.insert(tbl,string.format("a=ssrc:%d label:%d",audio_ssrc,msid))
-
-
-   return table.concat(tbl,"\r\n"),audio_candis,Video_candis
+   table.insert(tbl,string.format("a=ssrc:%d msid:%s %s",audio_ssrc,msid,label))
+   table.insert(tbl,string.format("a=ssrc:%d mslable:%s",audio_ssrc,msid))
+   table.insert(tbl,string.format("a=ssrc:%d label:%s",audio_ssrc,label))
+   table.insert(tbl,"")
+   return table.concat(tbl,"\r\n"),audio_candis,video_candis
 end
 
 
@@ -849,7 +876,7 @@ function sdp.new_sdp_info()
       encoding_name = "PCMU",
       clock_rate = 8000,
       channels = 1,
-      media_type = 1,--video,audio,other
+      media_type = 2,--video,audio,other
    }
    
    local telephoneevent = {

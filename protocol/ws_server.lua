@@ -112,13 +112,28 @@ function _M.new(fd,handle,opts)
       id = 6, -- socket
       replace = true,
       dispatch = function(fd,sz, msg,...)
-	 local co = coroutine.create(function()
-					cell.push(fd,msg,sz)
-					--print(t1:recv_frame())
-					local data ,typ,err = t1:recv_frame()
-					handle[typ](data)
-	 end)
-	 coroutine.resume(co)
+	 local buffer,bsz = cell.push(fd,msg,sz)
+	 print(sz,bsz)
+	 local sockets_event = cell.sockets_event()
+	 local ev = sockets_event[fd]
+	 print("xxx",ev)
+	 sockets_event[fd] = nil
+	 if not ev then
+	    print("start ev")
+	    cell.fork(function()
+		  while true do
+		     local data ,typ,err = t1:recv_frame()
+		     handle[typ](data)
+		  end
+	    end)
+	 else
+	    print("to wake up")
+	    local args = cell.sockets_arg()
+	    local arg = args[fd]
+	    if  bsz >arg then
+	       cell.wakeup(ev)
+	    end
+	 end
       end
    }
    return t1

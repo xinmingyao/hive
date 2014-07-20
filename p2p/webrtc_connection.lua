@@ -35,30 +35,43 @@ function peer_meta:answer(sdp_info,CandisStr)
 	  }
 	 }
       }
-   print("vvvvvvvvvvvvvvvv")
    local ok,local_streams = cell.call(self.pid,"start","controlling",streams_info)
-   print("xxxx=============",ok)
    if not ok then
       return false ,"start error"
    end
    self.local_sdp_info.candidates = local_streams[1].locals
    self.remote_sdp = sdp_info
    local user,pwd
-   user = local_streams[1].locals[1].user
-   pwd = local_streams[1].locals[1].pwd
+   local ice_info = sdp_info:ice_info()
+   user = ice_info.user
+   pwd = ice_info.pwd
    local ok,audio,video = sdp.get_remotes(CandisStr,user,pwd,is_rtcp_mux)
-   print("----------",ok)
+   
    assert(ok)
-   local remote_stream= {}
-   remote_stream[1].locals = audio
+   local remote_stream= {sid=1}
+   remote_stream.locals = audio
+   for k,v in pairs(audio) do
+      for k1,v1 in pairs(v) do
+	 print(k1,v1)
+      end
+   end
    cell.timeout(0,function()
-		   cell.call(self.pid,"set_remotes",remote_stream)
+		   cell.call(self.pid,"set_remotes",{remote_stream})
    end)
    
 end
 
 function peer_meta:get_local_sdp()
-   return self.local_sdp_info:get_sdp()
+   local finger = self.opts.fingerprint
+   local t = {}
+   local len = finger:len()
+   local i=1
+   while i<len do
+      table.insert(t,finger:sub(i,i+1))
+      i = i + 2
+   end
+   local fstr = table.concat(t,":")
+   return self.local_sdp_info:get_sdp(fstr)
 end
 
 function peer_meta:send(sid,cid,msg,sz)
@@ -94,7 +107,7 @@ function peer.new(...)
    end
    local user = "user"
    local pwd = "pwd"
-   local ip = "192.168.203.157"
+   local ip = "192.168.1.102"
    
    
    assert(type(opts)=="table")
@@ -125,6 +138,13 @@ function peer.new(...)
       opts.cfg = cfg
    end
    opts.client = cell.self
+   local x509 = require "ssl.x509"
+   local f = io.open(cfg.certificate)
+   local str = f:read("*a")
+   f:close()
+   local cert = x509.load(str)
+   assert(cert,"get cert error")
+   opts.fingerprint = cert:digest("sha256")
    if opts.dtls == true then
       local ssrc
       if not opts.ssrc then

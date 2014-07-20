@@ -42,7 +42,7 @@ local  handle = {
 	 local tmp1 = {}
 	 local i
 	 for i in ipairs(audio_candis) do
-	    local js = {SdpMLineIndex=0,
+	    local js = {sdpMLineIndex=0,
 			sdpMid= "audio",
 			candidate = audio_candis[i].."\r\n"}
 	    --js = json.encode(js)
@@ -50,7 +50,7 @@ local  handle = {
 	 end
 
 	 for i in ipairs(vedio_candis) do
-	    local js = {SdpMLineIndex=1,
+	    local js = {sdpMLineIndex=1,
 			sdpMid= "vedio",
 			candidate = audio_candis[i].."\r\n"}
 	    --js = json.encode(js)
@@ -62,6 +62,7 @@ local  handle = {
 	    sdp = local_sdp,
 	    candidates = tmp1}
 	 rep = json.encode(rep)
+	 print(rep)
 	 server:send_text(
 	    rep
 	 )

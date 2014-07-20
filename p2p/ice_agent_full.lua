@@ -25,7 +25,7 @@ local candi_id = 1
 local pair_id = 1
 local tx_id = 1
 local pair_id = 1
-local ta = 2000 -- timeout for gather and check
+local ta = 20 -- timeout for gather and check
 local max_count = 3 -- max timeout
 local que_meta = {} 
 local peer_pwd 
@@ -352,7 +352,7 @@ local function do_send_check(pair,tid)
    else
       req:add_attr('ICE_CONTROLLED',tie_break)
    end
-   req.key = local_pwd
+   req.key = peer_pwd
    local data = req:encode()
    local socket = pair.l.socket
    socket:write(data,pair.r.addr.ip,pair.r.addr.port)
@@ -467,8 +467,10 @@ local function is_agent_succeed()
 	       local cfg = opts.dtls_config
 	       assert(cfg)
 	       if role == "controlling" then
+		  print("begin listen",role)
 		  r,ssl_socket = socket:dtls_listen(cfg,pair.r.addr.ip,pair.r.addr.port)
 	       else
+		  cell.sleep(50)
 		  print("begin connect",role)
 		  r,ssl_socket  = socket:dtls_connect(cfg,pair.r.addr.ip,pair.r.addr.port)
 	       end
@@ -485,6 +487,11 @@ local function is_agent_succeed()
 		  end
 		  pair.srtp = srtp
 		  pair.ssl = ssl_socket
+		  local cert,msg = ssl_socket:getpeercertificate()
+		  print("aaa",msg)
+		  local fingerprint = cert:digest("sha256")
+		  print("peer fingerprint:",fingerprint)
+		  pair.fingerprint = fingerprint
 	       else
 		  print("error:",ssl_socket)
 		  cell.wakeup(set_remotes_ev,false,"dtls_error")
@@ -618,7 +625,7 @@ local function do_running(req,fd,peer_ip,peer_port)
       if conflict then
 	 local rep = stun.new('error','binding',req.tx_id)
 	 rep:add_attr('ERROR-CODE',{number=487,reason="role conflict",reserve=0,class=0})
-	 rep.key = local_pwd
+	 rep.key = peer_pwd
 	 local data = rep:encode()
 	 socket:write(data,peer_ip,peer_port)
 	 return	 
@@ -632,7 +639,7 @@ local function do_running(req,fd,peer_ip,peer_port)
       local priority = req:get_addr_value('PRIORITY',priority)
       rep:add_attr('XOR_MAPPED_ADDRESS',{ip=peer_ip,port=peer_port})
       rep:add_attr('PRIORITY',priority)
-      rep.key = local_pwd
+      rep.key = peer_pwd
       local data = rep:encode()
       socket:write(data,peer_ip,peer_port)
       -- find peer flex
@@ -1024,7 +1031,7 @@ cell.message {
       if b1 == 0x16 then --dtls
       elseif (state=="running" or state=="gather") and bit.rshift(b1,6) == 0x0 then
 	 print(state,sz,peer_pwd)
-	 local ok,req = stun.decode(msg,sz,peer_pwd)
+	 local ok,req = stun.decode(msg,sz,local_pwd)
 	 if not ok then
 	    print(req)
 	    return

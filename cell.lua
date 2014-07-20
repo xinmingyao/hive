@@ -360,8 +360,6 @@ function socket:connect_udp(...)
 end
 function socket:dtls_connect(cfg,ip,port)
    local fd = self.__fd
-   cell.sleep(50)
-   print("xxx:",sockets_event[fd])
    cfg.mode = "client"
    cell.connect_udp(fd,ip,port)
    if socket.dtls_open(self,cfg) then
@@ -735,5 +733,12 @@ end
 function cell.push(fd,msg,sz)
    local buffer,bsz = csocket.push(sockets[fd],msg,sz)
    sockets[fd] = buffer
+   return buffer,bsz
+end
+function cell.sockets_event()
+   return sockets_event
+end
+function cell.sockets_arg()
+   return sockets_arg
 end
 return cell

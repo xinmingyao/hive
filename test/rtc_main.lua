@@ -23,7 +23,7 @@ function test_client()
 end
 
 function start_server()
-   print(cell.listen("192.168.203.157:8085",function(fd,msg)
+   print(cell.listen("192.168.1.102:8085",function(fd,msg)
 		  local s = cell.cmd("launch", "test.room_control",fd)
 		  return s
    end))
