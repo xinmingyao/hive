@@ -35,7 +35,7 @@ function peer_meta:answer(sdp_info,CandisStr)
 	  }
 	 }
       }
-   local ok,local_streams = cell.call(self.pid,"start","controlling",streams_info)
+   local ok,local_streams = cell.call(self.pid,"start","controlled",streams_info)
    if not ok then
       return false ,"start error"
    end
@@ -107,7 +107,7 @@ function peer.new(...)
    end
    local user = "user"
    local pwd = "pwd"
-   local ip = "192.168.1.102"
+   local ip = "192.168.203.157"
    
    
    assert(type(opts)=="table")

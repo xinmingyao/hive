@@ -12,6 +12,8 @@ cell.command {
 }
 
 local csocket = require "cell.c.socket"
+local crypto = require "crypto"
+local hmac = crypto.hmac
 
 function test_class_methdo(C,M)
    local req = stun.new(C,M,9)
@@ -21,12 +23,24 @@ function test_class_methdo(C,M)
    assert(req2.class == C)
    assert(req2.method == M)
 end
+
+function test_1()
+   print(hmac.digest("sha1","hello","123"))
+   local f = io.open("./test/stun.bin1")
+   local str = f:read("*a")
+   f:close()
+   local key = "test_pwd"
+   local sz,msg = csocket.sendpack(str)
+   local ok,req2 = stun.decode(msg,sz,key)
+   print(ok,req2)
+   assert(0==req2.attrs['USE_CANDIDATE'])
+end
 function cell.main(msg,gui)
    local req = stun.new("request","binding",9)
    req:add_attr('PRIORITY',1)
    req:add_attr('USERNAME',"test")
    req:add_attr('PASSWORD',"pwd")
-   req:add_attr('USE_CANDIDATE',2)
+   req:add_attr('USE_CANDIDATE',0)
    req:add_attr('ICE_CONTROLLED',3)
    req:add_attr('ICE_CONTROLLING',4)
    req:add_attr('XOR_MAPPED_ADDRESS',{ip="192.168.203.1",port=8080})
@@ -41,7 +55,7 @@ function cell.main(msg,gui)
    assert(9==req2.tx_id)
    print(req2.attrs['PRIORITY'])
    assert(1==req2.attrs['PRIORITY'])
-   assert(2==req2.attrs['USE_CANDIDATE'])
+   assert(0==req2.attrs['USE_CANDIDATE'])
    assert(3==req2.attrs['ICE_CONTROLLED'])
    assert(4==req2.attrs['ICE_CONTROLLING'])
    local addr = req2.attrs['XOR_MAPPED_ADDRESS']
@@ -54,5 +68,6 @@ function cell.main(msg,gui)
    test_class_methdo("request","binding")
    test_class_methdo("response","binding")
    test_class_methdo("error","binding")
+   test_1()
    return 
 end

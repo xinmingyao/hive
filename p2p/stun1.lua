@@ -10,6 +10,54 @@ local STUN_MAGIC_COOKIE = 0x2112A442
 local stun = {}
 
 local stun_meta ={}
+local function bin2hex(s)
+   s=string.gsub(s,"(.)",function (x) return string.format("%02x",string.byte(x)) end)
+   return s
+end
+local h2b = {
+   ["0"] = 0,
+   ["1"] = 1,
+   ["2"] = 2,
+   ["3"] = 3,
+   ["4"] = 4,
+   ["5"] = 5,
+   ["6"] = 6,
+   ["7"] = 7,
+   ["8"] = 8,
+   ["9"] = 9,
+   ["a"] = 10,
+   ["b"] = 11,
+   ["c"] = 12,
+   ["d"] = 13,
+   ["e"] = 14,
+   ["f"] = 15,
+   ["A"] = 10,
+   ["B"] = 11,
+   ["C"] = 12,
+   ["D"] = 13,
+   ["E"] = 14,
+   ["F"] = 15
+}
+
+local function hex2bin(hexstr)
+   local i = 1
+   local s =""
+   while i<hexstr:len() do
+      local h,l
+      h = string.sub(hexstr,i,i)
+      l = string.sub(hexstr,i+1,i+1)
+      assert(h,l)
+      i = i + 2
+      s = s .. string.char(h2b[h]*16+h2b[l])
+   end
+--   local s = string.gsub(hexstr, "(.)(.)%s", function ( h, l )
+--			    print(h,l)
+--			    return string.char(h2b[h]*16+h2b[l])
+--   end)
+   return s
+end
+
+print(hex2bin("12"))
 function stun.new(c,m,t,a)
    if a == nil then
       a = {}
@@ -56,7 +104,10 @@ local function  decode_attr_addr(data,len,sz,pos)
 end
 
 local function decode_attr_int(data,len,sz,pos)
-   assert(len==4 or len == 8)
+   assert(len==0 or len==4 or len == 8)
+   if len ==0 then
+      return pos,0
+   end
    if len == 4 then
       return bin.unpack(">I",data,sz,pos)
    else
@@ -136,10 +187,15 @@ local function encode_attr_string(atype,str)
 end
 
 local function encode_attr_int(atype,num)
-   assert(type(num)=="number")
-   local f = ">SSI"
+   assert(type(num)=="number")   
    local len = 4
-   return bin.pack(f,atype,len,num)
+   if num ~= 0 then
+      local f = ">SSI"   
+      return bin.pack(f,atype,len,num)
+   else
+      local f = ">SS"
+      return bin.pack(f,atype,0)
+   end
 end
 
 local function encode_attr_long(atype,num)
@@ -313,18 +369,10 @@ function stun_meta:encode()
       local data1 = bin.pack(">SSIILA",s_type,len,STUN_MAGIC_COOKIE,0,req.tx_id,attrs)
       local integrity = hmac.digest("sha1",data1,req.key)
       assert(#integrity ==40)
-      --print(integrity)
       local first,second,last
       --integrity = tonumber(integrity,16)
-      first = string.sub(integrity,1,8)
-      first = tonumber(first,16)
-      
-      second = string.sub(integrity,9,-5)
-      second = tonumber(second,16)
-      
-      last = string.sub(integrity,17,-1)
-      last = tonumber(last,16)
-      integrity_data = bin.pack(">SSLLI",0x0008,20,first,second,last)
+
+      integrity_data = bin.pack(">SSA",0x0008,20,hex2bin(integrity))
    end
    
    attrs = attrs..integrity_data
@@ -388,14 +436,9 @@ function stun.decode(data,sz,key)
 	    msg = bin.pack(">SSA",t2,l3,d3)
 	 end
 	 integrity= hmac.digest("sha1",msg,key)
-	 first = string.sub(integrity,1,8)
-	 first = tonumber(first,16)      
-	 second = string.sub(integrity,9,-5)
-	 second = tonumber(second,16)
-	 last = string.sub(integrity,17,-1)
-	 last = tonumber(last,16)
-	 local digest1 = bin.pack(">LLI",first,second,last)
-	 if digest1 == digest then
+	 integrity2 = bin2hex(digest)
+	 print(integrity,integrity2)
+	 if integrity == integrity2 then
 	    req.integrity = true
 	 else
 	    return false,"fingerprint error"

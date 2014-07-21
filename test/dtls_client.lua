@@ -23,7 +23,7 @@ function cell.main()
    local fd = cell.open(9002,cell.self)
    --fd:write("hello world","127.",port)
    --fd:connect_udp("127.0.0.1",9998)
-   print(fd:dtls_connect(params,"192.168.1.102",port))
+   print(fd:dtls_connect(params,"192.168.203.157",port))
 
    return true
 end

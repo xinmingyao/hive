@@ -43,7 +43,7 @@ function cell.main(port,remotes)
 	 {sid=1,
 	  components = {
 	     {
-		cid=1,user="client",pwd="pwd1",port=port,ip="192.168.1.102"
+		cid=1,user="client",pwd="dkO+xzZVSvfDT1u4K5MKO/hz",port=port,ip="192.168.203.157"
 	     }
 	  }
 	 }

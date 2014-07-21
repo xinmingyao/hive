@@ -679,7 +679,7 @@ local function do_running(req,fd,peer_ip,peer_port)
       else
 	 local state = pair.state
 	 local que = local_streams[pair.sid].trigger_que
-	 if use_candidate and role == "controlled" then
+	 if use_candidate and use_candidate > 0 and role == "controlled" then
 	    pair.is_nominate = true 
 	 end
 	 if state == "PAIR_IN_PROGRESS" then
@@ -689,7 +689,7 @@ local function do_running(req,fd,peer_ip,peer_port)
 	    pair.state = "PAIR_WAITING"
 	    que:append({sid=pair.sid,pair_id=pair.id})
 	 elseif state == "PAIR_COMPLETED" then
-	    if role == "controlled" and use_candidate then
+	    if role == "controlled" and use_candidate and use_candidate > 0 then
 	       local i
 	       for i = 1, #local_streams[pair.sid].validlist do
 		  local p2 = local_streams[pair.sid].validlist[i]
