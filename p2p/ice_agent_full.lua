@@ -664,7 +664,7 @@ local function do_running(req,fd,peer_ip,peer_port)
 	    addr = {ip = peer_ip,port=peer_port},
 	    cid = c.cid,
 	    sid = c.sid,
-	    fid =  math:random(1,bin.lshift(1,20))
+	    fid =  math:random(1,bit.lshift(1,20))
 	 }
 	 local remotes = remote_streams[c.sid].locals
 	 table.insert(remotes,new_remote)

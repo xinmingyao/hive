@@ -200,9 +200,14 @@ end
 
 local function encode_attr_long(atype,num)
    assert(type(num)=="number")
-   local f = ">SSL"
    local len = 8
-   return bin.pack(f.atype,len,num)
+   if num ~=0 then
+      local f = ">SSL"
+      return bin.pack(f,atype,len,num)
+   else
+      local f = ">SS"
+      return bin.pack(f,atype,0)
+   end
 end
 
 local f = {
@@ -254,8 +259,8 @@ local encode_attr = {
    ALTERNATE_SERVER = function(...) return encode_attr_addr(0x8023,...) end,
    CACHE_TIMEOUT = function(...) return encode_attr_string(0x8027,...) end, --}; % draft-ietf-behave-nat-behavior-discovery-03
 --   FINGERPRINT = function(...) return encode_attr_string(0x8028,...) end,
-   ICE_CONTROLLED = function(...) return encode_attr_int(0x8029,...) end ,--}; % draft-ietf-mmusic-ice-19
-   ICE_CONTROLLING = function(...) return encode_attr_int(0x802a,...) end ,--}; % draft-ietf-mmusic-ice-19
+   ICE_CONTROLLED = function(...) return encode_attr_long(0x8029,...) end ,--}; % draft-ietf-mmusic-ice-19
+   ICE_CONTROLLING = function(...) return encode_attr_long(0x802a,...) end ,--}; % draft-ietf-mmusic-ice-19
    RESPONSE_ORIGIN = function(...) return  encode_attr_addr(0x802b,...) end,
    OTHER_ADDRESS = function(...) return encode_attr_addr(0x802c,...) end,
    X_VOVIDA_SECONDARY_ADDRESS = function(...) return encode_attr_addr(0x8050,...) end,--}; % VOVIDA non-standart
@@ -316,7 +321,7 @@ decode_attr[0xc002] = function(...) return 'BINDING_CHANGE', decode_attr_string(
 function stun_meta:encode()
    local req = self
    assert(req and type(req)=="table")
-   assert(type(req.tx_id) == "number")
+   --assert(type(req.tx_id) == "number")
    local attrs_tbl = req.attrs
    local k,v,attrs
    attrs = ""
@@ -365,8 +370,13 @@ function stun_meta:encode()
   
    local integrity_data = ""
    if req.key then
-      len = len + 24 
-      local data1 = bin.pack(">SSIILA",s_type,len,STUN_MAGIC_COOKIE,0,req.tx_id,attrs)
+      len = len + 24
+      local data1
+      if type(req.tx_id)=="string" then
+	 data1 = bin.pack(">SSIA",s_type,len,STUN_MAGIC_COOKIE,req.tx_id..attrs)	 
+      else
+	 data1 = bin.pack(">SSIILA",s_type,len,STUN_MAGIC_COOKIE,0,req.tx_id,attrs)
+      end
       local integrity = hmac.digest("sha1",data1,req.key)
       assert(#integrity ==40)
       local first,second,last
@@ -379,13 +389,25 @@ function stun_meta:encode()
    local finger_data = ""
    if req.fingerprint then
       len = len + 8 
-      local data2 = bin.pack(">SSIILA",s_type,len,STUN_MAGIC_COOKIE,0,req.tx_id,attrs)
+      local data2
+      if type(req.tx_id)== "string" then
+	 assert(string.len(req.tx_id)==12)
+	 data2= bin.pack(">SSIA",s_type,len,STUN_MAGIC_COOKIE,req.tx_id..attrs)
+      else
+	 data2= bin.pack(">SSIILA",s_type,len,STUN_MAGIC_COOKIE,0,req.tx_id,attrs)
+      end
       local crc = bit32.bxor(crc32.hash(data2),0x5354554e)         
       finger_data = bin.pack(">SSI",0x8028,0x0004,crc)
    end
    attrs = attrs..finger_data
-   local data = bin.pack(">SSIILA",s_type,len,STUN_MAGIC_COOKIE,0,req.tx_id,attrs)
-   return data
+   if type(req.tx_id)== "string" then
+      assert(string.len(req.tx_id)==12)
+      local data = bin.pack(">SSIA",s_type,len,STUN_MAGIC_COOKIE,req.tx_id..attrs)
+      return data
+   else
+      local data = bin.pack(">SSIILA",s_type,len,STUN_MAGIC_COOKIE,0,req.tx_id,attrs)
+      return data
+   end
 end
 function stun.decode(data,sz,key)
    local req = stun.new()
@@ -447,7 +469,13 @@ function stun.decode(data,sz,key)
 	 return false,"fingerprint data error"
       end
    end
-   local pos,s_type,len,magic_cookie,tmp,tx_id = bin.unpack(">SSIIL",data,sz)
+   local pos,s_type,len,magic_cookie,tx_id = bin.unpack(">SSIA12",data,sz)
+   local str = bin2hex(tx_id)
+   if str:find("0000") then
+      tx_id = tonumber(str)
+   else
+      print("===:",tx_id)
+   end
    if req.fingerprint then
       len = len - 8
    end
