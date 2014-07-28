@@ -11,7 +11,7 @@ local name = "rtc_client"
 local id
 local peers = {}
 local hivelib = require "hive.hive_lib"
-local json = require "cjson"
+local cjson = require "cjson"
 local rtc = require "p2p.webrtc_connection"
 local peer_sdp 
 local peer_candis ={}
@@ -30,18 +30,32 @@ cell.command {
 }
 
 
+local function send_peer(peer_id,rep)
+   m_socket = cell.connect(ip,port)
+   m_socket:write("POST /message?peer_id="..peer_id.."HTTP/1.0\r\n"
+		     .. "Content-Length: "..string.len(rep) .."\r\n"
+		     .. "Content-Type: text/plain\r\n"
+		     .."\r\n"
+		     ..rep		     
+   )
+   m_socket:disconnect()
+end
 local function  handle_peer_message(peer_id,data)
    local msg = cjson.decode(data)
    assert(msg)
+   --print(msg)
    cmd = msg.type
-   if cmd == "offer" then
-      local sdp1 = sdp.parse(m.sdp)
+   --for k,v in pairs(msg) do
+     -- print(k,v)
+   --end
+   if msg.type == "offer" then
+      local sdp1 = sdp.parse(msg.sdp)
       print(sdp1:is_bundle())
       peer_sdp = sdp1
-   elseif cmd == "add_candidate" then
-      local t1 = m.candidate
+   elseif msg.candidate ~= nil  then
+      local t1 = msg.candidate
       if t1:find("udp") then
-	 table.insert(peer_candis,m)
+	 table.insert(peer_candis,msg)
       end
    elseif cmd == "start" then
       print("start-----")
@@ -60,7 +74,7 @@ local function  handle_peer_message(peer_id,data)
       
       for i in ipairs(vedio_candis) do
 	 local js = {sdpMLineIndex=1,
-		     sdpMid= "vedio",
+		     sdpMid= "video",
 		     candidate = audio_candis[i].."\r\n"}
 	 --js = json.encode(js)
 	 table.insert(tmp1,js)
@@ -69,17 +83,15 @@ local function  handle_peer_message(peer_id,data)
       rep = {
 	 type="answer",
 	 sdp = local_sdp,
-	 candidates = tmp1}
+	 --candidates = tmp1
+      }
       rep = json.encode(rep)
-      print(rep)
-      m_socket = cell.connect(ip,port)
-      m_socket:write("POST /message?peer_id="..peer_id.."HTTP/1.0\r\n"
-			.. "Content-Length: "..string.len(rep) .."\r\n"
-			.. "Content-Type: text/plain\r\n"
-			.."\r\n"
-			..rep		     
-      )
-      m_socket:disconnect()
+     -- print(rep)
+      send_peer(peer_id,rep)
+      local i,v
+      for i,v in ipairs(candidates) do
+	 send_peer(peer_id,json.encode(v))
+      end
    else
       print("not support cmd:",cmd)
    end   
@@ -91,19 +103,29 @@ local function keepalive(t)
 		   hanging_socket:write("GET /wait?peer_id="..id.." HTTP/1.0\r\n\r\n")
 		   --keepalive(500)HTTP/1.0\r\n\r\n
 		  local d1 = hanging_socket:readline("Content-Length:")
+		 
 		  local len = hanging_socket:readline("\r\n")
 		  local d2 = hanging_socket:readline("\r\n\r\n")
 		  len = tonumber(len)
+		 
 		  local d3 = hanging_socket:readbytes(len)
+		  --print(d1)
+		  --print(d2)
+		  d2 = d1 ..d2
+		  local p1 = d2:find("Pragma:")
+		  local p2 = d2:find("\r\n",p1)
+		  local p3 = d2:sub(p1+8,p2)
+		  print(p3)
 		  print(d3)
-		  local d4 = hivelib.strsplit("\r\n",d3)
-		  local d5 = hivelib.strsplit(",",d4[1])
-		  local d6 = d5[2]
-		  d6 = tonumber(d6)
-		  if d6 ~= id then
-		     peers[d6] = d5
-		  else
+		  peer_id = tonumber(p3)
+		  if peer_id ~= id and d3:find("{") then 
 		     handle_peer_message(peer_id,d3)
+		  else
+		     local d4 = hivelib.strsplit("\r\n",d3)
+		     local d5 = hivelib.strsplit(",",d4[1])
+		     local d6 = d5[2]
+		     d6 = tonumber(d6)
+		     peers[d6] = d5
 		  end
 		  hanging_socket:disconnect()
 		  keepalive(0) 
@@ -113,7 +135,8 @@ end
 
 
 function cell.main()
-   ip,port = "10.3.0.182",8888
+   ip,port = "192.168.1.100",8888
+   print(ip,port)
    control_socket = cell.connect(ip,port)
    control_socket:write("GET /sign_in?"..name.." HTTP/1.0\r\n\r\nHTTP/1.0\r\n\r\n")
    local d1 = control_socket:readline("Content-Length:")
