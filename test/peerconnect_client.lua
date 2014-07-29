@@ -32,7 +32,7 @@ cell.command {
 
 local function send_peer(peer_id,rep)
    m_socket = cell.connect(ip,port)
-   m_socket:write("POST /message?peer_id="..peer_id.."HTTP/1.0\r\n"
+   m_socket:write("POST /message?peer_id="..id.."&to="..peer_id .." HTTP/1.0\r\n"
 		     .. "Content-Length: "..string.len(rep) .."\r\n"
 		     .. "Content-Type: text/plain\r\n"
 		     .."\r\n"
@@ -40,6 +40,43 @@ local function send_peer(peer_id,rep)
    )
    m_socket:disconnect()
 end
+local function answer_to()
+   print("start-----")
+   print(webrtc_client:answer(peer_sdp,peer_candis))
+   local local_sdp,audio_candis,vedio_candis=webrtc_client:get_local_sdp()
+   local rep
+   local tmp1 = {}
+   local i
+   for i in ipairs(audio_candis) do
+      local js = {sdpMLineIndex=0,
+		  sdpMid= "audio",
+		  candidate = audio_candis[i].."\r\n"}
+      --js = json.encode(js)
+      table.insert(tmp1,js)
+   end
+   
+   for i in ipairs(vedio_candis) do
+      local js = {sdpMLineIndex=1,
+		  sdpMid= "video",
+		  candidate = audio_candis[i].."\r\n"}
+      --js = json.encode(js)
+      table.insert(tmp1,js)
+   end
+   
+   rep = {
+      type="answer",
+      sdp = local_sdp,
+      --candidates = tmp1
+   }
+   rep = cjson.encode(rep)
+   -- print(rep)
+   send_peer(peer_id,rep)
+   local i,v
+   for i,v in ipairs(peer_candis) do
+      send_peer(peer_id,cjson.encode(v))
+   end
+end
+
 local function  handle_peer_message(peer_id,data)
    local msg = cjson.decode(data)
    assert(msg)
@@ -52,46 +89,16 @@ local function  handle_peer_message(peer_id,data)
       local sdp1 = sdp.parse(msg.sdp)
       print(sdp1:is_bundle())
       peer_sdp = sdp1
+      cell.timeout(1200,function()
+		      answer_to()
+      end)
    elseif msg.candidate ~= nil  then
       local t1 = msg.candidate
       if t1:find("udp") then
 	 table.insert(peer_candis,msg)
       end
    elseif cmd == "start" then
-      print("start-----")
-      print(webrtc_client:answer(peer_sdp,peer_candis))
-      local local_sdp,audio_candis,vedio_candis=webrtc:get_local_sdp()
-      local rep
-      local tmp1 = {}
-      local i
-      for i in ipairs(audio_candis) do
-	 local js = {sdpMLineIndex=0,
-		     sdpMid= "audio",
-		     candidate = audio_candis[i].."\r\n"}
-	 --js = json.encode(js)
-	 table.insert(tmp1,js)
-      end
       
-      for i in ipairs(vedio_candis) do
-	 local js = {sdpMLineIndex=1,
-		     sdpMid= "video",
-		     candidate = audio_candis[i].."\r\n"}
-	 --js = json.encode(js)
-	 table.insert(tmp1,js)
-      end
-      
-      rep = {
-	 type="answer",
-	 sdp = local_sdp,
-	 --candidates = tmp1
-      }
-      rep = json.encode(rep)
-     -- print(rep)
-      send_peer(peer_id,rep)
-      local i,v
-      for i,v in ipairs(candidates) do
-	 send_peer(peer_id,json.encode(v))
-      end
    else
       print("not support cmd:",cmd)
    end   
@@ -138,7 +145,7 @@ function cell.main()
    ip,port = "192.168.1.100",8888
    print(ip,port)
    control_socket = cell.connect(ip,port)
-   control_socket:write("GET /sign_in?"..name.." HTTP/1.0\r\n\r\nHTTP/1.0\r\n\r\n")
+   control_socket:write("GET /sign_in?"..name.." HTTP/1.0\r\n\r\n")
    local d1 = control_socket:readline("Content-Length:")
    local len = control_socket:readline("\r\n")
    local d2 = control_socket:readline("\r\n\r\n")
