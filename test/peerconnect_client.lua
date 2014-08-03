@@ -15,6 +15,7 @@ local cjson = require "cjson"
 local rtc = require "p2p.webrtc_connection"
 local peer_sdp 
 local peer_candis ={}
+local local_candis = {}
 local sdp = require "protocol.sdp"
 local m_socket
 local webrtc_client
@@ -58,7 +59,7 @@ local function answer_to()
    for i in ipairs(vedio_candis) do
       local js = {sdpMLineIndex=1,
 		  sdpMid= "video",
-		  candidate = audio_candis[i].."\r\n"}
+		  candidate = vedio_candis[i].."\r\n"}
       --js = json.encode(js)
       table.insert(tmp1,js)
    end
@@ -72,7 +73,7 @@ local function answer_to()
    -- print(rep)
    send_peer(peer_id,rep)
    local i,v
-   for i,v in ipairs(peer_candis) do
+   for i,v in ipairs(tmp1) do
       send_peer(peer_id,cjson.encode(v))
    end
 end
@@ -142,7 +143,7 @@ end
 
 
 function cell.main()
-   ip,port = "192.168.1.100",8888
+   ip,port = "192.168.1.101",8888
    print(ip,port)
    control_socket = cell.connect(ip,port)
    control_socket:write("GET /sign_in?"..name.." HTTP/1.0\r\n\r\n")

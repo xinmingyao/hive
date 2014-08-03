@@ -409,7 +409,7 @@ function stun_meta:encode()
       return data
    end
 end
-function stun.decode(data,sz,key)
+function stun.decode(data,sz,key,peer_key)
    local req = stun.new()
    local len = sz
    --local f = ">SSA" .. len..">CCCCI"
@@ -459,11 +459,14 @@ function stun.decode(data,sz,key)
 	 end
 	 integrity= hmac.digest("sha1",msg,key)
 	 integrity2 = bin2hex(digest)
+	 local tmp  = hmac.digest("sha1",msg,peer_key)
+	 print(tmp)
 	 print(integrity,integrity2)
 	 if integrity == integrity2 then
 	    req.integrity = true
 	 else
-	    return false,"fingerprint error"
+	    req.integrity = false
+	    --return false,"fingerprint error"
 	 end
       else
 	 return false,"fingerprint data error"

@@ -105,18 +105,18 @@ function peer.new(...)
    if opts == nil then
       opts = {}
    end
-   local user = "user"
-   local pwd = "pwd"
-   local ip = "192.168.203.157"
+   local user = "jT8RGVnRypR+NSQe"
+   local pwd = "PAiyzxXhGeYvKUPLXPLryQfg"
+   local ip = "192.168.1.102"
    
    
    assert(type(opts)=="table")
    if opts.user == nil then
-      opts.user = "test_user"
+      opts.user = user
    end
    
    if opts.pwd == nil then
-      opts.pwd = "test_pwd" --todo fix random_key
+      opts.pwd = pwd --todo fix random_key
    end
    
    if opts.ip == nil then
@@ -127,16 +127,19 @@ function peer.new(...)
    end
    local cfg = {
       protocol = "dtlsv1",
-      key = "./certs/server/key.pem",
-      certificate = "./certs/server/cert.pem",
-      cafile = "./certs/server/cacerts.pem",
-      verify = {"peer", "fail_if_no_peer_cert"},
+      key = "./certs/ss/key.key",
+      password= "12345678",
+      certificate = "./certs/ss/cert.pem",
+      cafile = "./certs/ss/ca.crt",
+      verify = {"none"},
+      depth = 2,
       options = {"all", "no_sslv2"}
    }
-   if opts.cfg == nil then
+   if opts.dtls_cfg == nil then
       opts.dtls=true
-      opts.cfg = cfg
+      opts.dtls_config = cfg
    end
+   print("xxxxxxxxxxxx",cfg.certificate)
    opts.client = cell.self
    local x509 = require "ssl.x509"
    local f = io.open(cfg.certificate)
