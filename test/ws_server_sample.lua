@@ -2,6 +2,7 @@ local cell = require "cell"
 local ws_server = require "protocol.ws_server"
 local socket
 local server  
+local json = require "cjson"
 cell.command {
 	ping = function()
 		cell.sleep(1)
@@ -15,8 +16,37 @@ cell.command {
 
 local  handle = {
    text = function(msg)
-      print("receive:",msg)
-      server:send_text(msg)
+      local req = json.decode(msg)
+      local rep
+      if req.type == "list_meeting" then
+	 rep = {
+	    stream= "iq",
+	    id= "1",
+	    from= "1@test",
+	    to= "2@test",
+	    type= "result",
+	    body = {
+	       {
+		  name= "test",
+		  host_name= "admin",
+		  create_time= "2014-01-01 56=80",
+		  statue= 0
+	       },
+	       {
+		  name= "test2",
+		  host_name= "admin",
+		  create_time= "2014-01-01 56=80",
+		  statue= 0
+	       }
+	    }
+	 }
+      elseif req.type == "create_meeting" then
+	 rep = {error="test"}
+      else
+	 rep = {error="test"}
+      end
+      rep = json.encode(rep)
+      server:send_text(rep)
    end  
 }
 function cell.main(fd)

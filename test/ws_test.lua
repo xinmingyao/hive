@@ -32,6 +32,6 @@ function cell.main()
    --ws_proto.parse_test()
   
    start_server()
-   test_client()
+  -- test_client()
    return 
 end
