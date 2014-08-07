@@ -91,6 +91,7 @@ local function ice_receive(opts,agent,sid,cid,msg,sz)
       --msg,sz,ssrc,ts,seq = srtp.unpack(msg,sz)
    end
    local f =  cell.get_message("receive")
+   print("=========",f)
    assert(f)
    f(sid,cid,msg,sz)
 end
