@@ -13,7 +13,26 @@ cell.command {
 	      return true
 	end
 }
-
+local count =1
+local function ta(t)
+   count = count +1
+   local rep = {
+      stream= "message",
+      id= "1",
+      from= "1@test",
+      to= "2@test",
+      type= "chat",
+      body= "hello world " .. count,
+      subject="query"
+   }
+   
+   rep = json.encode(rep)
+   server:send_text(rep)
+   cell.timeout(500,function()
+		   ta(500)
+   end)
+		
+end
 local  handle = {
    text = function(msg)
       local req = json.decode(msg)
@@ -47,6 +66,7 @@ local  handle = {
       end
       rep = json.encode(rep)
       server:send_text(rep)
+      ta(500)
    end  
 }
 function cell.main(fd)
