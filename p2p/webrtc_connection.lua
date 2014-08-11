@@ -52,7 +52,7 @@ function peer_meta:answer(sdp_info,CandisStr)
    remote_stream.locals = audio
    for k,v in pairs(audio) do
       for k1,v1 in pairs(v) do
-	 print(k1,v1)
+	 --print(k1,v1)
       end
    end
    cell.timeout(0,function()
@@ -162,7 +162,7 @@ function peer.new(...)
    p.ssrc = ssrc
    local pid = cell.cmd("launch", "p2p.ice_agent_full",streams_info,stun_servers,opts)
    p.pid = pid
-   print("monitor",cell.monitor(pid))
+   --print("monitor",cell.monitor(pid))
    return setmetatable(p,{__index = peer_meta})
 end
 return peer

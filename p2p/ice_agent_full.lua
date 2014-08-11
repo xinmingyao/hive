@@ -1003,30 +1003,35 @@ end
 local function  do_ice_handshake()
    form_checklist()
 end
+
+function get_socket_by_sid_cid()
+   local validlist = local_streams[sid].validlist
+      local i 
+      for i,pair in ipairs(validlist) do
+	 if pair.cid == cid then
+	    local socket = pair.l.socket
+	    return  socket
+	 end
+      end
+      return false
+end
 cell.message {
    send = function(sid,cid,msg,sz)
       local validlist = local_streams[sid].validlist
       local i 
-      for i=1,#validlist do
-	 local pair = validlist[i]
-	 if pair.cid == cid then
-	    local socket = pair.l.socket
-	    if opts.dtls then
-	       local srtp = pair.srtp
-	       local rtp,rtp_sz = lua_srtp.pack_rtp(msg,1,get_seq(),os.time())
-	       local ok,new_sz = lua_srtp.protect_rtp(srtp,rtp,rtp_sz)
-	       print("xxx",rtp,new_sz,rtp_sz)
-	       socket:write_raw(rtp,new_sz,pair.r.addr.ip,pair.r.addr.port)
-	    else
-	       socket:write(msg,pair.r.addr.ip,pair.r.addr.port)
-	    end
-	    return 
-	 end
+      local socket = get_socket_by_sid_cid(sid,cid)      
+      assert(socket,"no socket error in steams!")
+      if opts.dtls then
+	 local srtp = pair.srtp
+	 --local rtp,rtp_sz = lua_srtp.pack_rtp(msg,1,get_seq(),os.time())
+	 local ok,new_sz = lua_srtp.protect_data(srtp,msg,sz)
+	 socket:write_raw(rtp,new_sz,pair.r.addr.ip,pair.r.addr.port)
+      else
+	 socket:write(msg,pair.r.addr.ip,pair.r.addr.port)
       end
-      assert(false,"should not happen,no valid pair!")
+   
    end,
    accept_udp = function(fd,msg,sz,peer_ip,peer_port)
-      print("--------",msg,sz)
       --todo peek msg
       local pos,b1 = bin.unpack(">C",msg,sz)
       if sz < 0 then return end
@@ -1058,8 +1063,11 @@ cell.message {
 		  break
 	       end
 	    end
-	    assert(srtp)
-	    local ok,rtp_sz = lua_srtp.unprotect_rtp(srtp,msg,sz)
+	    if not srtp then
+	       print("srtp is nil")
+	       return
+	    end
+	    local ok,rtp_sz = lua_srtp.unprotect_data(srtp,msg,sz)
 
 	    if not ok then
 	       print("unportect error!!!")

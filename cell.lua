@@ -238,7 +238,8 @@ local rpc_head = {}
 
 local socket_ssl = {}
 local function close_msg(self)
-	cell.send(sockets_fd, "disconnect", self.__fd)
+   --todo
+   --cell.send(sockets_fd, "disconnect", self.__fd)
 end
 
 local socket_meta = {
