@@ -1026,6 +1026,7 @@ cell.message {
       assert(false,"should not happen,no valid pair!")
    end,
    accept_udp = function(fd,msg,sz,peer_ip,peer_port)
+      print("--------",msg,sz)
       --todo peek msg
       local pos,b1 = bin.unpack(">C",msg,sz)
       if sz < 0 then return end
@@ -1040,6 +1041,8 @@ cell.message {
 	 if states[state] then
 	    states[state](req,fd,peer_ip,peer_port)
 	 end
+      elseif bit.rshift(b1,6) == 0x0 then
+	 --flush todo response to
       else
 	 
 	 local c = socket_info[fd]
@@ -1056,12 +1059,14 @@ cell.message {
 	       end
 	    end
 	    assert(srtp)
-	    print(msg,sz)
 	    local ok,rtp_sz = lua_srtp.unprotect_rtp(srtp,msg,sz)
 
-	    assert(ok)
-	    local new_msg,new_sz = lua_srtp.unpack_rtp(msg,rtp_sz)
-	    cell.send(opts.client,"ice_receive",opts,cell.self,sid,cid,new_msg,new_sz)
+	    if not ok then
+	       print("unportect error!!!")
+	       return
+	    end
+	 --   local new_msg,new_sz = lua_srtp.unpack_rtp(msg,rtp_sz)
+	 --   cell.send(opts.client,"ice_receive",opts,cell.self,sid,cid,new_msg,new_sz)
 	    return 
 	 end
 	 cell.send(opts.client,"ice_receive",opts,cell.self,sid,cid,msg,sz)

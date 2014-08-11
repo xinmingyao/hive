@@ -30,6 +30,12 @@ cell.command {
 	end
 }
 
+cell.add_message(
+   "receive",function(...)
+ --     local pos,data = bin.unpack("A"..sz,msg,sz)
+      print("client receive:",...)
+end)
+
 
 local function send_peer(peer_id,rep)
    m_socket = cell.connect(ip,port)
