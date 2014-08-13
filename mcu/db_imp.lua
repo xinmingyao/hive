@@ -1,7 +1,7 @@
 local cell = require "cell"
 local mcu_tool = require "mcu.mcu_tool"
 local meetings ={}
-local meeting_no = 1
+local meeting_no = 0
 
 local function get_meeting_no()
    meeting_no = meeting_no + 1
@@ -15,7 +15,7 @@ cell.command {
       meetings[mt_no] = meet
       return mt_no
    end,
-   list_meetings = function(T)
+   list_meeting = function(T)
       local r = {}
       for k,v in ipairs(meetings) do
 	 local tmp = {}
