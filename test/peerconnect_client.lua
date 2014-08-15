@@ -58,7 +58,6 @@ local function answer_to()
       local js = {sdpMLineIndex=0,
 		  sdpMid= "audio",
 		  candidate = audio_candis[i].."\r\n"}
-      --js = json.encode(js)
       table.insert(tmp1,js)
    end
    
@@ -66,7 +65,6 @@ local function answer_to()
       local js = {sdpMLineIndex=1,
 		  sdpMid= "video",
 		  candidate = vedio_candis[i].."\r\n"}
-      --js = json.encode(js)
       table.insert(tmp1,js)
    end
    

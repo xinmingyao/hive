@@ -6,8 +6,42 @@ local sdp = require "protocol.sdp"
 
 local peer_meta = {}
 local peer = {}
+local local_streams = {}
+local remote_streams = {}
+--stream {type=audio unicast=recvonly  ssrc=1 msid=2 label=3 mslabel=4 cname=5}
+function peer_meta:add_stream(stream)
+   table.insert(local_streams,stream)
+end
+
+function peer_meta:get_stream_by_id(id)
+   local i,s
+   for i,s in ipairs(local_streams) do
+      if s.msid == id then
+	 return s
+      end
+   end
+
+   for i,s in ipairs(remote_streams) do
+      if s.msid == id then
+	 return s
+      end
+   end
+   return nil
+end
+
 function peer_meta:offer()   
-   return cell.call(self.pid,"start","controlling")
+   local streams_info =
+      {
+	 {sid=1,
+	  components = {
+	     {
+		cid=1,user=self.opts.user,pwd=self.opts.pwd,port=self.opts.port,ip=self.opts.ip
+	     }
+	  }
+	 }
+      }
+   local ok,local_streams =  cell.call(self.pid,"start","controlling")
+   self.local_sdp_info.candidates = local_streams[1].locals
 end
 
 

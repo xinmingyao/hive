@@ -707,12 +707,6 @@ function sdp_M:get_sdp(fingerprint)
    local ip = "127.0.0.1"
    local port = 7000 --default
    local str = "m=audio %d RTP/SAVPF %s"   
-   local payloads = {} 
-   for i in ipairs(info.payloads) do
-      table.insert(payloads,rtp_def[info.payloads[i].payload_type])
-   end
-   payloads = table.concat(payloads," ")
---   table.insert(tbl,string.format(str,1,payloads))
    table.insert(tbl,"m=audio 1 RTP/SAVPF 0 126")
    table.insert(tbl,string.format("c=IN IP4 %s",ip))
   -- if info.is_rtcp_mux then
@@ -843,6 +837,118 @@ function sdp_M:get_sdp(fingerprint)
    table.insert(tbl,string.format("a=ssrc:%d label:%s",audio_ssrc,label))
    table.insert(tbl,"")
    return table.concat(tbl,"\r\n"),audio_candis,video_candis
+end
+
+
+function sdp_M:get_sdp2(fingerprint,media_streams)
+   local tbl ={}
+   local info = self
+   table.insert(tbl,"v=0")
+   table.insert(tbl,"o=- 0 0 IN IP4 127.0.0.1")
+   table.insert(tbl,"s=-")
+   table.insert(tbl,"t=0 0")
+   if self.is_bundle then
+      table.insert(tbl,"a=group:BUNDLE audio video")
+      table.insert(tbl,string.format("a=msid-semantic: WMS %s",msid))
+   end
+   local candidates = info.candidates
+   assert(candidates,"must have candidates")
+   local i
+   local ip = "127.0.0.1"
+   local port = 7000 --default
+   local payloads = {} 
+   for i in ipairs(info.payloads) do
+      table.insert(payloads,rtp_def[info.payloads[i].payload_type])
+   end
+   payloads = table.concat(payloads," ")
+
+   local i,media_stream 
+   for i,media_stream in ipairs(media_streams) do
+      local candis = {}
+      if media_stream.type == "audio" then
+	 table.insert(tbl,"m="..media_stream.type .." 1 RTP/SAVPF 0 126")
+      elseif media_stream.type == "vedio" then
+	 table.insert(tbl,"m=video 1 RTP/SAVPF 100 116 117")
+      else
+	 assert(false,"not support media type")
+      end
+      table.insert(tbl,string.format("c=IN IP4 %s",ip))
+      table.insert(tbl,string.format("a=rtcp:%d IN IP4 %s",port,ip))
+      local user = candidates[1].user
+      local pwd = candidates[1].pwd
+      ip = candidates[1].addr.ip
+      port = candidates[1].addr.port
+      table.insert(tbl,"a=ice-ufrag:"..user)
+      table.insert(tbl,"a=ice-pwd:"..pwd)
+      for i in ipairs(candidates) do
+	 local candi = candidates[i]
+	 local cstr = "a=candidate:%s %s %s %s %s %s typ %s"
+	 local host_typ_str 
+	 host_typ_str = typ_str[candi.type]
+	 assert(host_typ_str)
+	 cstr = string.format(cstr,candi.fid,candi.cid,candi.transport,candi.priority,
+			      candi.addr.ip,candi.addr.port,host_typ_str)
+	 if candi.type ~="CANDIDATE_TYPE_HOST" then
+	    cstr = cstr .. string.format(" raddr %s rport %d",candi.base_addr.ip,candi.base_addr.port)
+	 end
+	 cstr = cstr .. "  generation 0"
+	 table.insert(candis,cstr)
+	 media_stream.candis = candis
+      end
+      table.insert(tbl,"a=fingerprint:sha-256 "..fingerprint)
+      assert(media_stream.unicast)
+      table.insert(tbl,"a="..media_stream.unicast)
+      table.insert(tbl,"a=rtcp-mux")
+      table.insert(tbl,"a=setup:active")
+      local mid = {audio="video",video="audio"}
+      if mid[media_stream.type] then
+	 table.insert(tbl,"a=mid:"..mid[media_stream.type])
+      end
+      if info.is_rtcp_mux then
+	 table.insert(tbl,"a=rtcp-mux")
+      end
+   
+      for i in ipairs(info.payloads) do
+	 local srtp =""
+	 local rtp = info.payloads[i]
+	 local typ = rtp_def[rtp.payload_type]
+	 
+	 if media_stream.type == "audio" and rtp.media_type == 2 then --audio
+	    if rtp.channels >1 then
+	       srtp = string.format("a=rtpmap:%d %s/%d/%d",typ,rtp.encoding_name,rtp.clock_rate,rtp.channels)
+	    else
+	       srtp = string.format("a=rtpmap:%d %s/%d",typ,rtp.encoding_name,rtp.clock_rate)
+	    end
+	    table.insert(tbl,srtp)
+	    if rtp.encoding_name == "opus" then
+	       table.insert(tbl,string.format("a=fmtp:%d minptime=10",typ))
+	    end
+	 elseif media_stream.type == "audio" and  
+	    rtp.media_type == 1 then --vedio
+	       srtp = string.format("a=rtpmap:%d %s/%d",typ,rtp.encoding_name,rtp.clock_rate)
+	       table.insert(tbl,srtp)
+	       if rtp.encoding_name == "VP8" then
+		  table.insert(tbl,string.format("a=rtcp-fb:%d ccm fir",typ))
+		  table.insert(tbl,string.format("a=rtcp-fb:%d nack",typ))
+		  table.insert(tbl,string.format("a=rtcp-fb:%d goog-remb",typ))
+	       end
+	 else
+	    assert(false,"not suport now!")
+	 end
+      end
+      local ssrc = media_stream.ssrc
+      local msid = media_stream.msid
+      local cname = media_stream.cname
+      local label = media_stream.lable
+      table.insert(tbl,"a=maxptime:60")
+      table.insert(tbl,string.format("a=ssrc:%d cname:%s",ssrc,cname))
+      table.insert(tbl,string.format("a=ssrc:%d msid:%s %s",ssrc,msid,label))
+      table.insert(tbl,string.format("a=ssrc:%d mslable:%s",ssrc,msid))
+      table.insert(tbl,string.format("a=ssrc:%d label:%s",ssrc,label))
+   end
+   
+   return table.concat(tbl,"\r\n")
+   
 end
 
 
